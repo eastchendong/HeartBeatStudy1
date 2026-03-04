@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>HeartBeat · Breathing Guide</title>
+<style>
+  /* ── Reset & base ─────────────────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #0d1117;
+    --surface:   #161b22;
+    --border:    #30363d;
+    --text:      #e6edf3;
+    --muted:     #8b949e;
+    --accent:    #58a6ff;
+    --green:     #3fb950;
+    --yellow:    #d29922;
+    --red:       #f85149;
+
+    --inhale-color:  #58a6ff;
+    --exhale-color:  #3fb950;
+
+    --circle-size: clamp(220px, 40vmin, 340px);
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    min-height: 100vh;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+  }
+
+  /* ── Header ──────────────────────────────────────────────────────────── */
+  header {
+    padding: 1rem 2rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  header h1 { font-size: 1.1rem; font-weight: 600; }
+  header .pill {
+    font-size: 0.72rem;
+    padding: 0.2em 0.7em;
+    border-radius: 999px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+  }
+  #ble-btn {
+    background: var(--surface);
+    color: var(--accent);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    margin-left: auto; /* Push to right */
+  }
+  #ble-btn:hover {
+    background: var(--border);
+  }
+  .pill-connected    { background: #1a3d2b; color: var(--green); }
+  .pill-disconnected { background: #3d1a1a; color: var(--red);   }
+  .pill-waiting      { background: #2b2a1a; color: var(--yellow); }
+
+  /* ── Main layout ─────────────────────────────────────────────────────── */
+  main {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2.5rem;
+    padding: 2rem 1rem;
+  }
+
+  /* ── BPM + cycle info row ────────────────────────────────────────────── */
+  .stats {
+    display: flex;
+    gap: 2rem;
+    align-items: flex-end;
+  }
+  .stat { text-align: center; }
+  .stat .value {
+    font-size: 2.6rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+  .stat .label {
+    font-size: 0.72rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-top: 0.3rem;
+  }
+  #bpm-value  { color: var(--red);    }
+  #cycle-value { color: var(--accent); }
+
+  /* ── Breathing circle ────────────────────────────────────────────────── */
+  .circle-wrap {
+    position: relative;
+    width: var(--circle-size);
+    height: var(--circle-size);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Outer glow ring */
+  .ring {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+    opacity: 0.25;
+    transition: color 0.6s ease;
+  }
+
+  /* The breathing circle */
+  #breath-circle {
+    width: 55%;
+    height: 55%;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, var(--circle-color, var(--inhale-color)), #1a2433);
+    box-shadow: 0 0 40px 6px var(--circle-color, var(--inhale-color));
+    transition: background 0.6s ease, box-shadow 0.6s ease;
+    /* animation is set dynamically via JS */
+    will-change: transform;
+  }
+
+  /* Idle pulse when no data */
+  @keyframes idle-pulse {
+    0%, 100% { transform: scale(1);    opacity: 0.5; }
+    50%       { transform: scale(1.08); opacity: 0.8; }
+  }
+
+  /* ── Phase text ──────────────────────────────────────────────────────── */
+  #phase-text {
+    position: absolute;
+    font-size: 1rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    transition: color 0.4s ease;
+    pointer-events: none;
+    user-select: none;
+  }
+
+  /* ── Progress arc ────────────────────────────────────────────────────── */
+  .arc-svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    transform: rotate(-90deg);
+  }
+  #arc-track {
+    fill: none;
+    stroke: var(--border);
+    stroke-width: 3;
+  }
+  #arc-fill {
+    fill: none;
+    stroke-width: 3;
+    stroke-linecap: round;
+    transition: stroke 0.6s ease;
+  }
+
+  /* ── Phase timeline bar ──────────────────────────────────────────────── */
+  .timeline {
+    display: flex;
+    gap: 4px;
+    width: min(400px, 90vw);
+  }
+  .timeline-seg {
+    height: 6px;
+    border-radius: 3px;
+    flex-shrink: 0;
+    position: relative;
+    overflow: hidden;
+    background: var(--border);
+  }
+  .timeline-seg .fill {
+    position: absolute;
+    inset: 0;
+    border-radius: 3px;
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: background 0.4s;
+  }
+  .timeline-seg[data-phase="inhale"] .fill { background: var(--inhale-color); }
+  .timeline-seg[data-phase="hold"]   .fill { background: var(--hold-color);   }
+  .timeline-seg[data-phase="exhale"] .fill { background: var(--exhale-color); }
+
+  /* ── Phase labels below timeline ─────────────────────────────────────── */
+  .timeline-labels {
+    display: flex;
+    width: min(400px, 90vw);
+  }
+  .timeline-label {
+    font-size: 0.68rem;
+    color: var(--muted);
+    text-align: center;
+    flex-shrink: 0;
+  }
+
+  /* ── History sparkline ───────────────────────────────────────────────── */
+  .history-section {
+    width: min(480px, 95vw);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1rem 1.2rem 0.8rem;
+  }
+  .history-section h2 {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin-bottom: 0.6rem;
+  }
+  #bpm-sparkline {
+    width: 100%;
+    height: 60px;
+    display: block;
+  }
+
+  /* ── Footer ──────────────────────────────────────────────────────────── */
+  footer {
+    text-align: center;
+    padding: 0.8rem;
+    font-size: 0.72rem;
+    color: var(--muted);
+    border-top: 1px solid var(--border);
+  }
+
+  /* ── Session-done overlay ─────────────────────────────────────────────── */
+  #session-done {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(13,17,23,0.92);
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 1.5rem;
+    z-index: 100;
+  }
+  #session-done.visible { display: flex; }
+  #session-done h2 { font-size: 2rem; color: var(--green); }
+  #session-done p  { color: var(--muted); font-size: 1rem; }
+  #session-done button {
+    padding: 0.6em 2em;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 1rem;
+    cursor: pointer;
+  }
+  #session-done button:hover { border-color: var(--accent); color: var(--accent); }
+</style>
+</head>
+<body>
+
+<header>
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f85149" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+  </svg>
+  <h1>HeartBeat · Breathing Guide</h1>
+  <button id="ble-btn" class="pill">Connect Sensor (BLE)</button>
+  <span id="conn-pill" class="pill pill-waiting">Waiting…</span>
+</header>
+
+<main>
+  <!-- BPM + cycle stats -->
+  <div class="stats">
+    <div class="stat">
+      <div class="value" id="bpm-value">––</div>
+      <div class="label">BPM (avg)</div>
+    </div>
+    <div class="stat">
+      <div class="value" id="hrv-value">––</div>
+      <div class="label">HRV RMSSD (ms)</div>
+    </div>
+    <div class="stat">
+      <div class="value" id="cycle-value">––</div>
+      <div class="label">Cycle (s)</div>
+    </div>
+    <div class="stat">
+      <div class="value" id="timer-value">10:00</div>
+      <div class="label">Remaining</div>
+    </div>
+  </div>
+
+  <!-- Animated circle -->
+  <div class="circle-wrap">
+    <div class="ring" id="ring-el"></div>
+
+    <svg class="arc-svg" viewBox="0 0 100 100">
+      <circle id="arc-track" cx="50" cy="50" r="47"/>
+      <circle id="arc-fill"  cx="50" cy="50" r="47" stroke-dasharray="295.3" stroke-dashoffset="295.3"/>
+    </svg>
+
+    <div id="breath-circle"></div>
+    <span id="phase-text">–</span>
+  </div>
+
+  <!-- Phase timeline (inhale + exhale only) -->
+  <div class="timeline" id="timeline">
+    <div class="timeline-seg" data-phase="inhale" id="seg-inhale"><div class="fill" id="fill-inhale"></div></div>
+    <div class="timeline-seg" data-phase="exhale" id="seg-exhale"><div class="fill" id="fill-exhale"></div></div>
+  </div>
+  <div class="timeline-labels" id="timeline-labels">
+    <div class="timeline-label" id="lbl-inhale">Inhale</div>
+    <div class="timeline-label" id="lbl-exhale">Exhale</div>
+  </div>
+
+  <!-- BPM history sparkline -->
+  <div class="history-section">
+    <h2>BPM History</h2>
+    <svg id="bpm-sparkline" preserveAspectRatio="none"></svg>
+  </div>
+</main>
+
+<footer>
+  Adaptive breathing · 10-min session · cycle adjusts with HRV
+</footer>
+
+<div id="session-done">
+  <h2>Session Complete ✓</h2>
+  <p>Great work! Your 10-minute breathing session has ended.</p>
+  <button onclick="resetSession()">Start New Session</button>
+</div>
+
+<script>
+// ── Constants ──────────────────────────────────────────────────────────────
+const CIRC  = 2 * Math.PI * 47;
+const COLORS = {
+  inhale: getComputedStyle(document.documentElement).getPropertyValue('--inhale-color').trim(),
+  exhale: getComputedStyle(document.documentElement).getPropertyValue('--exhale-color').trim(),
+};
+
+// ── Elements ───────────────────────────────────────────────────────────────
+const connPill   = document.getElementById('conn-pill');
+const bleBtn     = document.getElementById('ble-btn');
+const bpmEl      = document.getElementById('bpm-value');
+const hrvEl      = document.getElementById('hrv-value');
+const cycleEl    = document.getElementById('cycle-value');
+const timerEl    = document.getElementById('timer-value');
+const circleEl   = document.getElementById('breath-circle');
+const phaseEl    = document.getElementById('phase-text');
+const arcFill    = document.getElementById('arc-fill');
+const ringEl     = document.getElementById('ring-el');
+const segInhale  = document.getElementById('seg-inhale');
+const segExhale  = document.getElementById('seg-exhale');
+const fillInhale = document.getElementById('fill-inhale');
+const fillExhale = document.getElementById('fill-exhale');
+const lblInhale  = document.getElementById('lbl-inhale');
+const lblExhale  = document.getElementById('lbl-exhale');
+const sparkSvg   = document.getElementById('bpm-sparkline');
+const doneBanner = document.getElementById('session-done');
+
+// ── Breathing state ────────────────────────────────────────────────────────
+let cycle = { inhale: 5.0, exhale: 5.0, total: 10.0 };
+let animFrame  = null;
+let phaseStart = null;
+let currentPhase = 'inhale';   // 'inhale' | 'exhale'
+let pendingCycle = null;
+let idleMode = true;
+let sessionRemaining = 600;    // seconds; updated from server
+
+// ── BPM history ────────────────────────────────────────────────────────────
+const bpmHistory = [];
+const MAX_HISTORY = 60;
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function lerp(a, b, t) { return a + (b - a) * t; }
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+function easeInOut(t) { return t < 0.5 ? 2*t*t : -1 + (4 - 2*t)*t; }
+
+function phaseDuration() { return cycle[currentPhase] * 1000; }
+
+function nextPhase(p) { return p === 'inhale' ? 'exhale' : 'inhale'; }
+
+function formatTime(sec) {
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+// ── Session timer (client-side interpolation) ─────────────────────────────
+let lastTimerSync = Date.now();
+
+function tickTimer() {
+  if (sessionRemaining <= 0) {
+    timerEl.textContent = '0:00';
+    doneBanner.classList.add('visible');
+    return;
+  }
+  const now = Date.now();
+  const elapsed = (now - lastTimerSync) / 1000;
+  const display = Math.max(0, sessionRemaining - elapsed);
+  timerEl.textContent = formatTime(display);
+  if (display <= 0) doneBanner.classList.add('visible');
+  setTimeout(tickTimer, 500);
+}
+
+// ── Color theme per phase ─────────────────────────────────────────────────
+const SCALE = { inhale: 1.42, exhale: 0.72 };
+
+function applyPhaseColor(phase) {
+  const c = COLORS[phase];
+  circleEl.style.setProperty('--circle-color', c);
+  circleEl.style.background = `radial-gradient(circle at 35% 35%, ${c}, #1a2433)`;
+  circleEl.style.boxShadow  = `0 0 40px 6px ${c}`;
+  ringEl.style.color        = c;
+  arcFill.style.stroke      = c;
+  phaseEl.style.color       = c;
+  phaseEl.textContent       = phase === 'inhale' ? 'Inhale' : 'Exhale';
+}
+
+// ── Timeline ──────────────────────────────────────────────────────────────
+function layoutTimeline() {
+  const total  = cycle.total;
+  const totalW = document.getElementById('timeline').clientWidth - 4;
+  [[segInhale, lblInhale, 'inhale'], [segExhale, lblExhale, 'exhale']].forEach(([el, lbl, key]) => {
+    const w = Math.round(totalW * cycle[key] / total);
+    el.style.width  = w + 'px';
+    lbl.style.width = w + 'px';
+    lbl.textContent = `${key.charAt(0).toUpperCase()+key.slice(1)} ${cycle[key]}s`;
+  });
+}
+
+function updateTimelineFills(phase) {
+  [fillInhale, fillExhale].forEach(f => {
+    f.style.transition = 'none';
+    f.style.transform  = 'scaleX(0)';
+  });
+  const el = phase === 'inhale' ? fillInhale : fillExhale;
+  void el.offsetWidth;
+  el.style.transition = `transform ${phaseDuration()}ms linear`;
+  el.style.transform  = 'scaleX(1)';
+}
+
+// ── Main animation loop ───────────────────────────────────────────────────
+function startPhase(phase, ts) {
+  currentPhase = phase;
+  phaseStart   = ts;
+  applyPhaseColor(phase);
+  updateTimelineFills(phase);
+}
+
+function animate(ts) {
+  animFrame = requestAnimationFrame(animate);
+
+  const elapsed  = ts - phaseStart;
+  const duration = phaseDuration();
+  const progress = clamp(elapsed / duration, 0, 1);
+
+  // Arc covers full cycle
+  const phaseOffset = currentPhase === 'inhale' ? 0 : cycle.inhale * 1000;
+  const cycleProgress = clamp((phaseOffset + elapsed) / (cycle.total * 1000), 0, 1);
+  arcFill.style.strokeDashoffset = CIRC * (1 - cycleProgress);
+
+  // Circle scale
+  const scale = currentPhase === 'inhale'
+    ? lerp(SCALE.exhale, SCALE.inhale, easeInOut(progress))
+    : lerp(SCALE.inhale, SCALE.exhale, easeInOut(progress));
+  circleEl.style.transform = `scale(${scale.toFixed(3)})`;
+
+  // Phase transition
+  if (progress >= 1) {
+    const next = nextPhase(currentPhase);
+    if (next === 'inhale' && pendingCycle) {
+      cycle = pendingCycle;
+      pendingCycle = null;
+      layoutTimeline();
+    }
+    startPhase(next, ts);
+  }
+}
+
+function startBreathing() {
+  if (animFrame) cancelAnimationFrame(animFrame);
+  idleMode = false;
+  circleEl.style.animation = 'none';
+  layoutTimeline();
+  requestAnimationFrame(ts => {
+    startPhase('inhale', ts);
+    animFrame = requestAnimationFrame(animate);
+  });
+}
+
+function showIdle() {
+  if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
+  idleMode = true;
+  circleEl.style.transform = 'scale(1)';
+  circleEl.style.animation = 'idle-pulse 3s ease-in-out infinite';
+  arcFill.style.strokeDashoffset = CIRC;
+  phaseEl.textContent = 'Waiting for sensor…';
+  phaseEl.style.color = 'var(--muted)';
+  ringEl.style.color  = 'var(--muted)';
+}
+
+// ── Sparkline ─────────────────────────────────────────────────────────────
+function updateSparkline() {
+  if (bpmHistory.length < 2) return;
+  const W = sparkSvg.clientWidth || 400;
+  const H = 60;
+  const lo = Math.min(...bpmHistory) - 5;
+  const hi = Math.max(...bpmHistory) + 5;
+  const xStep = W / (MAX_HISTORY - 1);
+  const pts = bpmHistory.map((v, i) => {
+    const x = i * xStep;
+    const y = H - ((v - lo) / (hi - lo)) * H;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  sparkSvg.innerHTML = `
+    <polyline points="${pts}" fill="none" stroke="var(--red)" stroke-width="1.5"
+      stroke-linecap="round" stroke-linejoin="round" opacity="0.8"/>
+    <text x="4" y="12"      fill="var(--muted)" font-size="9">${Math.round(hi-5)} bpm</text>
+    <text x="4" y="${H-3}"  fill="var(--muted)" font-size="9">${Math.round(lo+5)} bpm</text>`;
+}
+
+// ── SSE connection ─────────────────────────────────────────────────────────
+let sseRetryDelay = 2000;
+
+function connectSSE() {
+  const es = new EventSource('/api/stream');
+
+  es.onopen = () => {
+    sseRetryDelay = 2000;
+    connPill.className   = 'pill pill-waiting';
+    connPill.textContent = 'Connected – awaiting data…';
+  };
+
+  es.onmessage = (ev) => {
+    const data = JSON.parse(ev.data);
+    const { bpm, hrv_rmssd, total, inhale, exhale, session_remaining } = data;
+
+    bpmEl.textContent   = bpm > 0 ? bpm.toFixed(1) : '––';
+    hrvEl.textContent   = hrv_rmssd != null ? hrv_rmssd.toFixed(1) : '––';
+    cycleEl.textContent = total ? total.toFixed(1) : '––';
+
+    // Sync session timer
+    if (session_remaining !== undefined) {
+      sessionRemaining  = session_remaining;
+      lastTimerSync     = Date.now();
+      if (session_remaining <= 0) doneBanner.classList.add('visible');
+    }
+
+    if (bpm > 0) {
+      connPill.className   = 'pill pill-connected';
+      connPill.textContent = 'Live ♥';
+
+      bpmHistory.push(bpm);
+      if (bpmHistory.length > MAX_HISTORY) bpmHistory.shift();
+      updateSparkline();
+
+      const newCycle = { total, inhale, exhale };
+      if (idleMode) { cycle = newCycle; startBreathing(); }
+      else          { pendingCycle = newCycle; }
+    }
+  };
+
+  es.onerror = () => {
+    es.close();
+    connPill.className   = 'pill pill-disconnected';
+    connPill.textContent = 'Disconnected – retrying…';
+    setTimeout(connectSSE, sseRetryDelay);
+    sseRetryDelay = Math.min(sseRetryDelay * 1.5, 15000);
+  };
+}
+
+// ── Reset session ──────────────────────────────────────────────────────────
+async function resetSession() {
+  await fetch('/api/reset', { method: 'POST' });
+  doneBanner.classList.remove('visible');
+  sessionRemaining = 600;
+  lastTimerSync    = Date.now();
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────
+showIdle();
+connectSSE();
+tickTimer();
+window.addEventListener('resize', () => { if (!idleMode) layoutTimeline(); });
+
+// ── Web Bluetooth Logic ───────────────────────────────────────────────────
+const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+const DEVICE_NAME = "HeartBeat-ESP32";
+const CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+
+let lastBeatTime = 0;
+const ibiBuffer = [];
+const IBI_BUFFER_SIZE = 10;
+let lastPostTime = 0;
+const POST_INTERVAL = 1000; // ms
+
+function computeRMSSD(ibis) {
+  if (ibis.length < 2) return null;
+  let sumSqDiff = 0;
+  for (let i = 1; i < ibis.length; i++) {
+    const diff = (ibis[i] - ibis[i-1]) * 1000; // convert to ms
+    sumSqDiff += diff * diff;
+  }
+  return Math.sqrt(sumSqDiff / (ibis.length - 1));
+}
+
+async function onBeat() {
+  const now = Date.now() / 1000; // seconds
+  if (lastBeatTime > 0) {
+    const ibi = now - lastBeatTime;
+    // Filter unreasonable beats (30–240 BPM range: 0.25s–2.0s)
+    if (ibi > 0.25 && ibi < 2.0) {
+      ibiBuffer.push(ibi);
+      if (ibiBuffer.length > IBI_BUFFER_SIZE) {
+        ibiBuffer.shift();
+      }
+
+      const avgIbi = ibiBuffer.reduce((a, b) => a + b, 0) / ibiBuffer.length;
+      const bpm = Math.round(60.0 / avgIbi);
+      const rmssd = computeRMSSD(ibiBuffer);
+
+      console.log(`[BLE] BEAT! IBI=${ibi.toFixed(3)}s BPM=${bpm} RMSSD=${rmssd ? rmssd.toFixed(1) : '--'}`);
+
+      // Anti-spam for POST requests
+      if ((Date.now() - lastPostTime) >= POST_INTERVAL) {
+        try {
+          const payload = { bpm: bpm };
+          if (rmssd !== null) {
+            payload.hrv_rmssd = parseFloat(rmssd.toFixed(2));
+          }
+          // Fire and forget
+          fetch('/api/pulse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          }).catch(e => console.error("Post error:", e));
+          
+          lastPostTime = Date.now();
+        } catch (e) {
+          console.error("Error processing beat:", e);
+        }
+      }
+    }
+  }
+  lastBeatTime = now;
+}
+
+function handleCharacteristicValueChanged(event) {
+  const value = event.target.value;
+  const decoder = new TextDecoder('utf-8');
+  const text = decoder.decode(value).trim();
+  // Depending on how the ESP32 sends it (sometimes null-terminated or with garbage), trim is good.
+  // The Arduino code sends "BEAT" (std::string), which might not include null terminator if using setValue(std::string).
+  // `pCharacteristic->setValue(msg)` uses the string length.
+  // So it should be exactly "BEAT".
+  if (text.includes("BEAT")) {
+    onBeat();
+  }
+}
+
+bleBtn.addEventListener('click', async () => {
+  try {
+    if (!navigator.bluetooth) {
+      alert('Web Bluetooth is not supported in this browser/context. Try Chrome on Android or Desktop. Ensure you are using HTTPS (or localhost).');
+      return;
+    }
+
+    console.log('Requesting Bluetooth Device...');
+    const device = await navigator.bluetooth.requestDevice({
+      filters: [{ name: DEVICE_NAME }],
+      optionalServices: [SERVICE_UUID]
+    });
+
+    console.log('Connecting to GATT Server...');
+    const server = await device.gatt.connect();
+
+    console.log('Getting Service...');
+    const service = await server.getPrimaryService(SERVICE_UUID);
+
+    console.log('Getting Characteristic...');
+    const characteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
+
+    console.log('Starting Notifications...');
+    await characteristic.startNotifications();
+    characteristic.addEventListener('characteristicvaluechanged', handleCharacteristicValueChanged);
+    
+    bleBtn.textContent = 'BLE Connected';
+    bleBtn.style.borderColor = 'var(--green)';
+    bleBtn.style.color = 'var(--green)';
+    bleBtn.disabled = true; // Prevent multiple connections
+
+  } catch (error) {
+    console.log('Argh! ' + error);
+    alert('BLE Connection failed: ' + error);
+  }
+});
+</script>
+</body>
+</html>
