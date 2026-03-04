@@ -55,10 +55,24 @@
     color: var(--accent);
     border: 1px solid var(--border);
     cursor: pointer;
-    margin-left: auto; /* Push to right */
+    margin-left: auto;
   }
   #ble-btn:hover {
     background: var(--border);
+  }
+  #relay-keyword, #relay-select {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0.2em 0.7em;
+    font-size: 0.72rem;
+  }
+  .relay-btn {
+    background: var(--surface);
+    color: var(--accent);
+    border: 1px solid var(--border);
+    cursor: pointer;
   }
   .pill-connected    { background: #1a3d2b; color: var(--green); }
   .pill-disconnected { background: #3d1a1a; color: var(--red);   }
@@ -271,6 +285,11 @@
   </svg>
   <h1>HeartBeat · Breathing Guide</h1>
   <button id="ble-btn" class="pill">Connect Sensor (BLE)</button>
+  <input id="relay-keyword" value="C5AB" title="Relay keyword" />
+  <button id="relay-search-btn" class="pill relay-btn">Search Relay</button>
+  <select id="relay-select"></select>
+  <button id="relay-connect-btn" class="pill relay-btn">Connect Relay</button>
+  <button id="relay-stop-btn" class="pill relay-btn">Stop Relay</button>
   <span id="conn-pill" class="pill pill-waiting">Waiting…</span>
 </header>
 
@@ -346,6 +365,11 @@ const COLORS = {
 // ── Elements ───────────────────────────────────────────────────────────────
 const connPill   = document.getElementById('conn-pill');
 const bleBtn     = document.getElementById('ble-btn');
+const relayKeywordEl = document.getElementById('relay-keyword');
+const relaySearchBtn = document.getElementById('relay-search-btn');
+const relaySelectEl  = document.getElementById('relay-select');
+const relayConnectBtn = document.getElementById('relay-connect-btn');
+const relayStopBtn = document.getElementById('relay-stop-btn');
 const bpmEl      = document.getElementById('bpm-value');
 const hrvEl      = document.getElementById('hrv-value');
 const cycleEl    = document.getElementById('cycle-value');
@@ -700,6 +724,59 @@ bleBtn.addEventListener('click', async () => {
     alert('BLE Connection failed: ' + error);
   }
 });
+
+async function refreshRelayStatus() {
+  const resp = await fetch('/api/relay/status');
+  const data = await resp.json();
+  const running = !!data.running;
+  relayConnectBtn.disabled = running;
+  relayStopBtn.disabled = !running;
+  if (running) {
+    relayConnectBtn.textContent = `Relay Running (${data.device_name_keyword || ''})`;
+  } else {
+    relayConnectBtn.textContent = 'Connect Relay';
+  }
+}
+
+relaySearchBtn.addEventListener('click', async () => {
+  const keyword = relayKeywordEl.value.trim();
+  const resp = await fetch(`/api/relay/search?keyword=${encodeURIComponent(keyword)}`);
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ error: 'relay search failed' }));
+    alert(err.error || 'relay search failed');
+    return;
+  }
+  const data = await resp.json();
+  relaySelectEl.innerHTML = '';
+  (data.devices || []).forEach((d) => {
+    const opt = document.createElement('option');
+    opt.value = d.name;
+    opt.textContent = `${d.name} (${d.address})`;
+    relaySelectEl.appendChild(opt);
+  });
+});
+
+relayConnectBtn.addEventListener('click', async () => {
+  const picked = relaySelectEl.value || relayKeywordEl.value.trim();
+  const resp = await fetch('/api/relay/connect', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ device_name_keyword: picked })
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ error: 'relay connect failed' }));
+    alert(err.error || 'relay connect failed');
+    return;
+  }
+  await refreshRelayStatus();
+});
+
+relayStopBtn.addEventListener('click', async () => {
+  await fetch('/api/relay/disconnect', { method: 'POST' });
+  await refreshRelayStatus();
+});
+
+refreshRelayStatus();
 </script>
 </body>
 </html>

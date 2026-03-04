@@ -10,10 +10,18 @@ Adaptive breathing logic (MVP):
   - If RMSSD drops below a rolling baseline → difficulty detected → cycle = 11 s
   - If RMSSD recovers to baseline → cycle returns to 10 s
 """
+import asyncio
+import importlib.util
 import json
+import os
 import queue
+import shlex
+import shutil
+import subprocess
+import sys
 import time
 from collections import deque
+from pathlib import Path
 from threading import Lock
 
 from flask import Flask, Response, jsonify, render_template, request
@@ -43,6 +51,74 @@ _subscribers: list[queue.Queue] = []
 _paused:        bool  = False
 _pause_time:    float = 0.0   # when the session was paused
 _elapsed_before_pause: float = 0.0  # accumulated seconds before current pause
+_relay_lock = Lock()
+_relay_process: subprocess.Popen | None = None
+_relay_device_keyword: str | None = None
+
+
+def _relay_script() -> Path:
+    return Path(__file__).resolve().parents[1] / "ble-relay-server-python" / "main.py"
+
+
+def _relay_running() -> bool:
+    return _relay_process is not None and _relay_process.poll() is None
+
+
+def _bleak_ready() -> bool:
+    return importlib.util.find_spec("bleak") is not None
+
+
+def _is_wsl() -> bool:
+    try:
+        return "microsoft" in os.uname().release.lower()
+    except Exception:
+        return False
+
+
+def _windows_bridge_ready() -> bool:
+    return _is_wsl() and shutil.which("powershell.exe") is not None and shutil.which("wslpath") is not None
+
+
+def _wsl_to_windows_path(path: Path) -> str:
+    return subprocess.check_output(["wslpath", "-w", str(path)], text=True).strip()
+
+
+def _build_windows_relay_cmd(keyword: str, scan_only: bool = False, timeout: float = 6.0) -> list[str]:
+    relay_win = _wsl_to_windows_path(_relay_script())
+    safe_keyword = keyword.replace('"', "").strip()
+    parts = [
+        "py -3",
+        shlex.quote(relay_win).replace("'", '"'),
+        "--device-name",
+        shlex.quote(safe_keyword).replace("'", '"'),
+        "--scan-timeout",
+        str(timeout),
+    ]
+    if scan_only:
+        parts.append("--scan-only")
+    else:
+        parts.extend(["--flask-url", '"http://localhost:5000/api/pulse"', "--disable-tcp"])
+    cmdline = " ".join(parts)
+    return ["powershell.exe", "-NoProfile", "-Command", cmdline]
+
+
+def _format_ble_backend_error(exc: Exception) -> str:
+    text = str(exc)
+    if "org.bluez" in text or "DBus.Error.ServiceUnknown" in text:
+        return ("BLE backend unavailable in this Linux/WSL runtime (org.bluez missing). "
+                "Run relay on Windows host Bluetooth, or enable BlueZ on native Linux.")
+    return f"ble search failed: {text}"
+
+
+def _ble_backend_preflight(timeout: float = 2.0) -> str | None:
+    if _windows_bridge_ready():
+        return None
+    try:
+        from bleak import BleakScanner
+        asyncio.run(BleakScanner.discover(timeout=timeout))
+        return None
+    except Exception as e:
+        return _format_ble_backend_error(e)
 
 
 def _compute_cycle(rmssd: float | None) -> float:
@@ -217,6 +293,140 @@ def stream():
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@app.route("/api/relay/search")
+def relay_search():
+    keyword = request.args.get("keyword", "").strip().upper()
+    timeout = float(request.args.get("timeout", 6))
+    timeout = min(max(timeout, 2.0), 20.0)
+    if _windows_bridge_ready():
+        try:
+            cmd = _build_windows_relay_cmd(keyword or "", scan_only=True, timeout=timeout)
+            proc = subprocess.run(cmd, cwd=str(_relay_script().parent), capture_output=True, text=True, timeout=timeout + 12)
+            if proc.returncode != 0:
+                detail = (proc.stderr or proc.stdout or "").strip()
+                return jsonify({"error": f"windows relay scan failed: {detail}"}), 503
+            payload = []
+            for line in reversed((proc.stdout or "").splitlines()):
+                line = line.strip()
+                if line.startswith("[") or line.startswith("{"):
+                    try:
+                        payload = json.loads(line)
+                        break
+                    except Exception:
+                        continue
+            return jsonify({"devices": payload if isinstance(payload, list) else []})
+        except Exception as e:
+            return jsonify({"error": f"windows relay scan failed: {e}"}), 503
+
+    if _bleak_ready():
+        try:
+            from bleak import BleakScanner
+            devices = asyncio.run(BleakScanner.discover(timeout=timeout))
+        except Exception as e:
+            return jsonify({"error": _format_ble_backend_error(e)}), 503
+
+        results = []
+        for d in devices:
+            name = (d.name or "").strip()
+            if not name:
+                continue
+            if keyword and keyword not in name.upper():
+                continue
+            results.append({"name": name, "address": d.address})
+        return jsonify({"devices": results})
+
+    return jsonify({
+        "error": "No BLE backend available. Install bleak+BlueZ on Linux, or use WSL with Windows Python/PowerShell bridge.",
+    }), 503
+
+
+@app.route("/api/relay/connect", methods=["POST"])
+def relay_connect():
+    global _relay_process, _relay_device_keyword
+    body = request.get_json(silent=True) or {}
+    keyword = (body.get("device_name_keyword") or "C5AB").strip()
+    if not keyword:
+        return jsonify({"error": "device_name_keyword required"}), 400
+    backend_error = _ble_backend_preflight()
+    if backend_error:
+        return jsonify({"error": backend_error}), 503
+
+    with _relay_lock:
+        if _relay_running():
+            return jsonify({"ok": True, "running": True, "device_name_keyword": _relay_device_keyword})
+
+        relay_script = _relay_script()
+        if not relay_script.exists():
+            return jsonify({"error": f"relay script not found: {relay_script}"}), 500
+
+        if _windows_bridge_ready():
+            cmd = _build_windows_relay_cmd(keyword, scan_only=False, timeout=6.0)
+        elif _bleak_ready():
+            cmd = [
+                sys.executable,
+                str(relay_script),
+                "--device-name", keyword,
+                "--flask-url", "http://127.0.0.1:5000/api/pulse",
+                "--disable-tcp",
+            ]
+        else:
+            return jsonify({"error": "No BLE backend available for relay connect."}), 503
+        _relay_process = subprocess.Popen(
+            cmd,
+            cwd=str(relay_script.parent),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
+        _relay_device_keyword = keyword
+        time.sleep(0.6)
+        if not _relay_running():
+            code = _relay_process.poll() if _relay_process else -1
+            detail = ""
+            if _relay_process and _relay_process.stderr:
+                raw = _relay_process.stderr.read() or b""
+                if isinstance(raw, bytes):
+                    detail = raw.decode("utf-8", errors="replace").strip().splitlines()[-1:] or [""]
+                    detail = detail[0]
+                else:
+                    detail = str(raw).strip().splitlines()[-1:] or [""]
+                    detail = detail[0]
+            _relay_process = None
+            _relay_device_keyword = None
+            msg = f"relay process failed to start (exit={code})"
+            if detail:
+                msg = f"{msg}: {detail}"
+            return jsonify({"error": msg}), 500
+    return jsonify({"ok": True, "running": True, "device_name_keyword": keyword})
+
+
+@app.route("/api/relay/disconnect", methods=["POST"])
+def relay_disconnect():
+    global _relay_process, _relay_device_keyword
+    with _relay_lock:
+        if not _relay_running():
+            _relay_process = None
+            _relay_device_keyword = None
+            return jsonify({"ok": True, "running": False})
+        _relay_process.terminate()
+        try:
+            _relay_process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            _relay_process.kill()
+            _relay_process.wait(timeout=2)
+        _relay_process = None
+        _relay_device_keyword = None
+    return jsonify({"ok": True, "running": False})
+
+
+@app.route("/api/relay/status")
+def relay_status():
+    with _relay_lock:
+        return jsonify({
+            "running": _relay_running(),
+            "device_name_keyword": _relay_device_keyword,
+        })
 
 
 if __name__ == "__main__":
