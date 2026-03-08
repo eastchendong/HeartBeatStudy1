@@ -370,6 +370,7 @@
   </svg>
   <h1>HeartBeat · 呼吸训练</h1>
   <div class="header-right">
+    <span id="session-id-label" style="font-size:0.7rem;color:var(--muted);padding:0.2em 0.5em;border:1px solid var(--border);border-radius:999px;font-family:monospace;"></span>
     <button id="ble-btn" class="pill">连接传感器 (BLE)</button>
     <input id="relay-keyword" value="C5AB" title="Relay keyword" style="width:70px"/>
     <button id="relay-search-btn" class="pill relay-btn">搜索设备</button>
@@ -492,6 +493,18 @@
 </div>
 
 <script>
+// ══════════════════════════════════════════════════════════════════════════
+// SESSION ID  (read from ?id=xxx or ?session_id=xxx in URL)
+// ══════════════════════════════════════════════════════════════════════════
+const _urlParams = new URLSearchParams(window.location.search);
+const SESSION_ID = _urlParams.get('id') || _urlParams.get('session_id') || 'default';
+
+/** Append ?id=SESSION_ID to an API path */
+function api(path) {
+  const sep = path.includes('?') ? '&' : '?';
+  return `${path}${sep}id=${encodeURIComponent(SESSION_ID)}`;
+}
+
 // ══════════════════════════════════════════════════════════════════════════
 // CONSTANTS
 // ══════════════════════════════════════════════════════════════════════════
@@ -728,7 +741,7 @@ function updateSparkline() {
 let sseRetryDelay = 2000;
 
 function connectSSE() {
-  const es = new EventSource('/api/stream');
+  const es = new EventSource(api('/api/stream'));
 
   es.onopen = () => {
     sseRetryDelay = 2000;
@@ -796,7 +809,7 @@ async function startSession() {
   const username    = cfgUsername.value.trim();
 
   // Send config to server
-  await fetch('/api/configure', {
+  await fetch(api('/api/configure'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -808,7 +821,7 @@ async function startSession() {
   });
 
   // Start session on server
-  await fetch('/api/start', { method: 'POST' });
+  await fetch(api('/api/start'), { method: 'POST' });
 
   // Local state
   sessionDuration  = duration;
@@ -839,11 +852,11 @@ async function onSessionComplete() {
   timerEl.textContent = '0:00';
 
   // Stop session on server
-  await fetch('/api/stop', { method: 'POST' });
+  await fetch(api('/api/stop'), { method: 'POST' });
 
   // Get session summary from server
   try {
-    const resp = await fetch('/api/status');
+    const resp = await fetch(api('/api/status'));
     const data = await resp.json();
     // These are live values; full summary comes from save
   } catch(e) { /* ignore */ }
@@ -863,7 +876,7 @@ async function saveSessionData() {
   saveBtn.disabled = true;
   saveStatus.textContent = '保存中…';
   try {
-    const resp = await fetch('/api/save_session', {
+    const resp = await fetch(api('/api/save_session'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: cfgUsername.value.trim() })
@@ -891,7 +904,7 @@ async function saveSessionData() {
 }
 
 async function restartSession() {
-  await fetch('/api/reset', { method: 'POST' });
+  await fetch(api('/api/reset'), { method: 'POST' });
   doneBanner.classList.remove('visible');
   sessionActive = false;
   showIdle();
@@ -946,7 +959,7 @@ async function onBeat() {
           // Send raw RR intervals (in ms) for server-side HRV computation
           payload.rr_intervals = ibiBuffer.map(x => Math.round(x * 1000));
           if (rmssd !== null) payload.hrv_rmssd = parseFloat(rmssd.toFixed(2));
-          fetch('/api/pulse', {
+          fetch(api('/api/pulse'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -994,7 +1007,7 @@ bleBtn.addEventListener('click', async () => {
 // RELAY
 // ══════════════════════════════════════════════════════════════════════════
 async function refreshRelayStatus() {
-  const resp = await fetch('/api/relay/status');
+  const resp = await fetch('/api/relay/status');  // relay is server-wide, no session_id needed
   const data = await resp.json();
   const running = !!data.running;
   relayConnectBtn.disabled = running;
@@ -1009,7 +1022,7 @@ relaySearchBtn.addEventListener('click', async () => {
   relaySearchBtn.disabled = true;
   try {
     const keyword = relayKeywordEl.value.trim();
-    const resp = await fetch(`/api/relay/search?keyword=${encodeURIComponent(keyword)}`);
+    const resp = await fetch(`/api/relay/search?keyword=${encodeURIComponent(keyword)}`);  // relay is server-wide
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({ error: '搜索失败' }));
       alert(err.error || '搜索失败');
@@ -1031,7 +1044,7 @@ relaySearchBtn.addEventListener('click', async () => {
 
 relayConnectBtn.addEventListener('click', async () => {
   const picked = relaySelectEl.value || relayKeywordEl.value.trim();
-  const resp = await fetch('/api/relay/connect', {
+  const resp = await fetch('/api/relay/connect', {  // relay is server-wide
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ device_name_keyword: picked })
@@ -1045,7 +1058,7 @@ relayConnectBtn.addEventListener('click', async () => {
 });
 
 relayStopBtn.addEventListener('click', async () => {
-  await fetch('/api/relay/disconnect', { method: 'POST' });
+  await fetch('/api/relay/disconnect', { method: 'POST' });  // relay is server-wide
   await refreshRelayStatus();
 });
 
@@ -1055,6 +1068,9 @@ relayStopBtn.addEventListener('click', async () => {
 connectSSE();
 refreshRelayStatus();
 window.addEventListener('resize', () => { if (!idleMode) layoutTimeline(); });
+
+// Show session ID
+document.getElementById('session-id-label').textContent = `ID: ${SESSION_ID}`;
 </script>
 </body>
 </html>
