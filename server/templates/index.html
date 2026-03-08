@@ -1,9 +1,9 @@
-<!DOCTYPE html>
-<html lang="en">
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>HeartBeat · Breathing Guide</title>
+<title>HeartBeat · 呼吸训练</title>
 <style>
   /* ── Reset & base ─────────────────────────────────────────────────────── */
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -18,10 +18,8 @@
     --green:     #3fb950;
     --yellow:    #d29922;
     --red:       #f85149;
-
     --inhale-color:  #58a6ff;
     --exhale-color:  #3fb950;
-
     --circle-size: clamp(220px, 40vmin, 340px);
   }
 
@@ -41,6 +39,7 @@
     display: flex;
     align-items: center;
     gap: 0.75rem;
+    flex-wrap: wrap;
   }
   header h1 { font-size: 1.1rem; font-weight: 600; }
   header .pill {
@@ -50,16 +49,20 @@
     font-weight: 600;
     letter-spacing: 0.03em;
   }
+  .header-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
   #ble-btn {
     background: var(--surface);
     color: var(--accent);
     border: 1px solid var(--border);
     cursor: pointer;
-    margin-left: auto;
   }
-  #ble-btn:hover {
-    background: var(--border);
-  }
+  #ble-btn:hover { background: var(--border); }
   #relay-keyword, #relay-select {
     background: var(--surface);
     color: var(--text);
@@ -78,21 +81,124 @@
   .pill-disconnected { background: #3d1a1a; color: var(--red);   }
   .pill-waiting      { background: #2b2a1a; color: var(--yellow); }
 
-  /* ── Main layout ─────────────────────────────────────────────────────── */
-  main {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 2.5rem;
-    padding: 2rem 1rem;
+  /* ── Screen management ───────────────────────────────────────────────── */
+  .screen { display: none; }
+  .screen.active { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2rem; padding: 2rem 1rem; }
+
+  /* ── START SCREEN ────────────────────────────────────────────────────── */
+  #start-screen {
+    min-height: 70vh;
+  }
+  .setup-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 2rem 2.5rem;
+    max-width: 480px;
+    width: 90vw;
+  }
+  .setup-card h2 {
+    font-size: 1.4rem;
+    margin-bottom: 1.5rem;
+    color: var(--accent);
+    text-align: center;
+  }
+  .form-group {
+    margin-bottom: 1.2rem;
+  }
+  .form-group label {
+    display: block;
+    font-size: 0.82rem;
+    color: var(--muted);
+    margin-bottom: 0.35rem;
+    letter-spacing: 0.03em;
+  }
+  .form-group input[type="number"],
+  .form-group input[type="text"] {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.55em 0.8em;
+    color: var(--text);
+    font-size: 0.92rem;
+    outline: none;
+  }
+  .form-group input:focus {
+    border-color: var(--accent);
+  }
+  .form-group .hint {
+    font-size: 0.7rem;
+    color: var(--muted);
+    margin-top: 0.25rem;
   }
 
-  /* ── BPM + cycle info row ────────────────────────────────────────────── */
+  /* Toggle switch */
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1.2rem;
+  }
+  .toggle-row label {
+    font-size: 0.82rem;
+    color: var(--muted);
+  }
+  .toggle-switch {
+    position: relative;
+    width: 44px;
+    height: 24px;
+  }
+  .toggle-switch input { opacity: 0; width: 100%; height: 100%; position: absolute; inset: 0; z-index: 2; cursor: pointer; margin: 0; }
+  .toggle-slider {
+    position: absolute; inset: 0;
+    background: var(--border);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: background 0.3s;
+  }
+  .toggle-slider::before {
+    content: '';
+    position: absolute;
+    width: 18px; height: 18px;
+    left: 3px; top: 3px;
+    background: var(--text);
+    border-radius: 50%;
+    transition: transform 0.3s;
+  }
+  .toggle-switch input:checked + .toggle-slider {
+    background: var(--accent);
+  }
+  .toggle-switch input:checked + .toggle-slider::before {
+    transform: translateX(20px);
+  }
+
+  #start-btn {
+    width: 100%;
+    padding: 0.75em;
+    border: none;
+    border-radius: 10px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 1.05rem;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 0.5rem;
+    transition: opacity 0.2s;
+  }
+  #start-btn:hover { opacity: 0.88; }
+
+  /* ── TRAINING SCREEN ─────────────────────────────────────────────────── */
+  #training-screen.active {
+    gap: 2.5rem;
+  }
+
   .stats {
     display: flex;
     gap: 2rem;
     align-items: flex-end;
+    flex-wrap: wrap;
+    justify-content: center;
   }
   .stat { text-align: center; }
   .stat .value {
@@ -108,7 +214,7 @@
     letter-spacing: 0.08em;
     margin-top: 0.3rem;
   }
-  #bpm-value  { color: var(--red);    }
+  #bpm-value  { color: var(--red); }
   #cycle-value { color: var(--accent); }
 
   /* ── Breathing circle ────────────────────────────────────────────────── */
@@ -120,36 +226,25 @@
     align-items: center;
     justify-content: center;
   }
-
-  /* Outer glow ring */
   .ring {
-    position: absolute;
-    inset: 0;
+    position: absolute; inset: 0;
     border-radius: 50%;
     border: 2px solid currentColor;
     opacity: 0.25;
     transition: color 0.6s ease;
   }
-
-  /* The breathing circle */
   #breath-circle {
-    width: 55%;
-    height: 55%;
+    width: 55%; height: 55%;
     border-radius: 50%;
     background: radial-gradient(circle at 35% 35%, var(--circle-color, var(--inhale-color)), #1a2433);
     box-shadow: 0 0 40px 6px var(--circle-color, var(--inhale-color));
     transition: background 0.6s ease, box-shadow 0.6s ease;
-    /* animation is set dynamically via JS */
     will-change: transform;
   }
-
-  /* Idle pulse when no data */
   @keyframes idle-pulse {
     0%, 100% { transform: scale(1);    opacity: 0.5; }
     50%       { transform: scale(1.08); opacity: 0.8; }
   }
-
-  /* ── Phase text ──────────────────────────────────────────────────────── */
   #phase-text {
     position: absolute;
     font-size: 1rem;
@@ -161,66 +256,30 @@
     pointer-events: none;
     user-select: none;
   }
-
-  /* ── Progress arc ────────────────────────────────────────────────────── */
   .arc-svg {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
     transform: rotate(-90deg);
   }
-  #arc-track {
-    fill: none;
-    stroke: var(--border);
-    stroke-width: 3;
-  }
-  #arc-fill {
-    fill: none;
-    stroke-width: 3;
-    stroke-linecap: round;
-    transition: stroke 0.6s ease;
-  }
+  #arc-track { fill: none; stroke: var(--border); stroke-width: 3; }
+  #arc-fill  { fill: none; stroke-width: 3; stroke-linecap: round; transition: stroke 0.6s ease; }
 
-  /* ── Phase timeline bar ──────────────────────────────────────────────── */
-  .timeline {
-    display: flex;
-    gap: 4px;
-    width: min(400px, 90vw);
-  }
+  /* ── Phase timeline ──────────────────────────────────────────────────── */
+  .timeline { display: flex; gap: 4px; width: min(400px, 90vw); }
   .timeline-seg {
-    height: 6px;
-    border-radius: 3px;
-    flex-shrink: 0;
-    position: relative;
-    overflow: hidden;
-    background: var(--border);
+    height: 6px; border-radius: 3px; flex-shrink: 0;
+    position: relative; overflow: hidden; background: var(--border);
   }
   .timeline-seg .fill {
-    position: absolute;
-    inset: 0;
-    border-radius: 3px;
-    transform: scaleX(0);
-    transform-origin: left;
-    transition: background 0.4s;
+    position: absolute; inset: 0; border-radius: 3px;
+    transform: scaleX(0); transform-origin: left; transition: background 0.4s;
   }
   .timeline-seg[data-phase="inhale"] .fill { background: var(--inhale-color); }
-  .timeline-seg[data-phase="hold"]   .fill { background: var(--hold-color);   }
   .timeline-seg[data-phase="exhale"] .fill { background: var(--exhale-color); }
+  .timeline-labels { display: flex; width: min(400px, 90vw); }
+  .timeline-label { font-size: 0.68rem; color: var(--muted); text-align: center; flex-shrink: 0; }
 
-  /* ── Phase labels below timeline ─────────────────────────────────────── */
-  .timeline-labels {
-    display: flex;
-    width: min(400px, 90vw);
-  }
-  .timeline-label {
-    font-size: 0.68rem;
-    color: var(--muted);
-    text-align: center;
-    flex-shrink: 0;
-  }
-
-  /* ── History sparkline ───────────────────────────────────────────────── */
+  /* ── BPM sparkline ───────────────────────────────────────────────────── */
   .history-section {
     width: min(480px, 95vw);
     background: var(--surface);
@@ -235,11 +294,7 @@
     color: var(--muted);
     margin-bottom: 0.6rem;
   }
-  #bpm-sparkline {
-    width: 100%;
-    height: 60px;
-    display: block;
-  }
+  #bpm-sparkline { width: 100%; height: 60px; display: block; }
 
   /* ── Footer ──────────────────────────────────────────────────────────── */
   footer {
@@ -250,22 +305,46 @@
     border-top: 1px solid var(--border);
   }
 
-  /* ── Session-done overlay ─────────────────────────────────────────────── */
+  /* ── SESSION-DONE OVERLAY ────────────────────────────────────────────── */
   #session-done {
     display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(13,17,23,0.92);
-    align-items: center;
-    justify-content: center;
+    position: fixed; inset: 0;
+    background: rgba(13,17,23,0.94);
+    align-items: center; justify-content: center;
     flex-direction: column;
-    gap: 1.5rem;
+    gap: 1.2rem;
     z-index: 100;
+    padding: 2rem;
   }
   #session-done.visible { display: flex; }
   #session-done h2 { font-size: 2rem; color: var(--green); }
-  #session-done p  { color: var(--muted); font-size: 1rem; }
-  #session-done button {
+
+  .summary-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem 2rem;
+    max-width: 400px;
+    width: 90vw;
+  }
+  .summary-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.4em 0;
+    font-size: 0.9rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .summary-row:last-child { border: none; }
+  .summary-row .sk { color: var(--muted); }
+  .summary-row .sv { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  .done-actions {
+    display: flex;
+    gap: 0.8rem;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .done-actions button {
     padding: 0.6em 2em;
     border-radius: 8px;
     border: 1px solid var(--border);
@@ -274,7 +353,13 @@
     font-size: 1rem;
     cursor: pointer;
   }
-  #session-done button:hover { border-color: var(--accent); color: var(--accent); }
+  .done-actions button:hover { border-color: var(--accent); color: var(--accent); }
+  .done-actions .primary-btn {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+  .done-actions .primary-btn:hover { opacity: 0.85; color: #fff; }
 </style>
 </head>
 <body>
@@ -283,156 +368,248 @@
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f85149" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
     <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
   </svg>
-  <h1>HeartBeat · Breathing Guide</h1>
-  <button id="ble-btn" class="pill">Connect Sensor (BLE)</button>
-  <input id="relay-keyword" value="C5AB" title="Relay keyword" />
-  <button id="relay-search-btn" class="pill relay-btn">Search Relay</button>
-  <select id="relay-select"></select>
-  <button id="relay-connect-btn" class="pill relay-btn">Connect Relay</button>
-  <button id="relay-stop-btn" class="pill relay-btn">Stop Relay</button>
-  <span id="conn-pill" class="pill pill-waiting">Waiting…</span>
+  <h1>HeartBeat · 呼吸训练</h1>
+  <div class="header-right">
+    <button id="ble-btn" class="pill">连接传感器 (BLE)</button>
+    <input id="relay-keyword" value="C5AB" title="Relay keyword" style="width:70px"/>
+    <button id="relay-search-btn" class="pill relay-btn">搜索设备</button>
+    <select id="relay-select"></select>
+    <button id="relay-connect-btn" class="pill relay-btn">连接 Relay</button>
+    <button id="relay-stop-btn" class="pill relay-btn">断开 Relay</button>
+    <span id="conn-pill" class="pill pill-waiting">等待中…</span>
+  </div>
 </header>
 
+<!-- ═══════════════════ START SCREEN ═══════════════════ -->
 <main>
-  <!-- BPM + cycle stats -->
+<div id="start-screen" class="screen active">
+  <div class="setup-card">
+    <h2>训练设置</h2>
+
+    <div class="form-group">
+      <label for="cfg-username">用户名（可选）</label>
+      <input type="text" id="cfg-username" placeholder="匿名" maxlength="64"/>
+    </div>
+
+    <div class="form-group">
+      <label for="cfg-cycle">每次呼吸时长 (秒)</label>
+      <input type="number" id="cfg-cycle" value="10" min="4" max="20"/>
+      <div class="hint">例如 9 = 吸气 4.5s + 呼气 4.5s；10 = 吸气 5s + 呼气 5s</div>
+    </div>
+
+    <div class="form-group">
+      <label for="cfg-duration">训练总时长 (秒)</label>
+      <input type="number" id="cfg-duration" value="120" min="30" max="3600"/>
+      <div class="hint">默认 120 秒（2 分钟）。可设 30–3600 秒</div>
+    </div>
+
+    <div class="toggle-row">
+      <label>自适应呼吸 (HRV 自动调节 ±0.5s)</label>
+      <div class="toggle-switch">
+        <input type="checkbox" id="cfg-adaptive" checked />
+        <span class="toggle-slider"></span>
+      </div>
+    </div>
+    <div class="form-group" style="margin-bottom:0.4rem">
+      <div class="hint" id="adaptive-hint">开启后，当 HRV 下降时自动将呼吸周期 +1s；恢复后还原。</div>
+    </div>
+
+    <button id="start-btn">开始训练</button>
+  </div>
+</div>
+
+<!-- ═══════════════════ TRAINING SCREEN ═══════════════════ -->
+<div id="training-screen" class="screen">
   <div class="stats">
     <div class="stat">
       <div class="value" id="bpm-value">––</div>
-      <div class="label">BPM (avg)</div>
+      <div class="label">BPM (平均)</div>
     </div>
     <div class="stat">
       <div class="value" id="hrv-value">––</div>
       <div class="label">HRV RMSSD (ms)</div>
     </div>
     <div class="stat">
-      <div class="value" id="cycle-value">––</div>
-      <div class="label">Cycle (s)</div>
+      <div class="value" id="lf-value">––</div>
+      <div class="label">LF Power</div>
     </div>
     <div class="stat">
-      <div class="value" id="timer-value">10:00</div>
-      <div class="label">Remaining</div>
+      <div class="value" id="cycle-value">––</div>
+      <div class="label">周期 (s)</div>
+    </div>
+    <div class="stat">
+      <div class="value" id="timer-value">2:00</div>
+      <div class="label">剩余时间</div>
     </div>
   </div>
 
-  <!-- Animated circle -->
   <div class="circle-wrap">
     <div class="ring" id="ring-el"></div>
-
     <svg class="arc-svg" viewBox="0 0 100 100">
       <circle id="arc-track" cx="50" cy="50" r="47"/>
       <circle id="arc-fill"  cx="50" cy="50" r="47" stroke-dasharray="295.3" stroke-dashoffset="295.3"/>
     </svg>
-
     <div id="breath-circle"></div>
     <span id="phase-text">–</span>
   </div>
 
-  <!-- Phase timeline (inhale + exhale only) -->
   <div class="timeline" id="timeline">
     <div class="timeline-seg" data-phase="inhale" id="seg-inhale"><div class="fill" id="fill-inhale"></div></div>
     <div class="timeline-seg" data-phase="exhale" id="seg-exhale"><div class="fill" id="fill-exhale"></div></div>
   </div>
   <div class="timeline-labels" id="timeline-labels">
-    <div class="timeline-label" id="lbl-inhale">Inhale</div>
-    <div class="timeline-label" id="lbl-exhale">Exhale</div>
+    <div class="timeline-label" id="lbl-inhale">吸气</div>
+    <div class="timeline-label" id="lbl-exhale">呼气</div>
   </div>
 
-  <!-- BPM history sparkline -->
   <div class="history-section">
-    <h2>BPM History</h2>
+    <h2>心率历史</h2>
     <svg id="bpm-sparkline" preserveAspectRatio="none"></svg>
   </div>
+</div>
 </main>
 
-<footer>
-  Adaptive breathing · 10-min session · cycle adjusts with HRV
+<footer id="footer-text">
+  HeartBeat 呼吸训练 · 连接设备后开始
 </footer>
 
+<!-- ═══════════════════ SESSION-DONE OVERLAY ═══════════════════ -->
 <div id="session-done">
-  <h2>Session Complete ✓</h2>
-  <p>Great work! Your 10-minute breathing session has ended.</p>
-  <button onclick="resetSession()">Start New Session</button>
+  <h2>训练完成 ✓</h2>
+  <div class="summary-card" id="summary-card">
+    <div class="summary-row"><span class="sk">平均心率</span><span class="sv" id="sum-bpm-avg">––</span></div>
+    <div class="summary-row"><span class="sk">最高心率</span><span class="sv" id="sum-bpm-max">––</span></div>
+    <div class="summary-row"><span class="sk">最低心率</span><span class="sv" id="sum-bpm-min">––</span></div>
+    <div class="summary-row"><span class="sk">HRV RMSSD</span><span class="sv" id="sum-rmssd">––</span></div>
+    <div class="summary-row"><span class="sk">LF Power</span><span class="sv" id="sum-lf">––</span></div>
+    <div class="summary-row"><span class="sk">RR 间期数量</span><span class="sv" id="sum-rr-count">––</span></div>
+  </div>
+  <div class="done-actions">
+    <button class="primary-btn" id="save-btn">保存数据</button>
+    <button id="restart-btn">重新开始</button>
+  </div>
+  <div id="save-status" style="font-size:0.82rem;color:var(--muted);margin-top:0.3rem;"></div>
 </div>
 
 <script>
-// ── Constants ──────────────────────────────────────────────────────────────
-const CIRC  = 2 * Math.PI * 47;
+// ══════════════════════════════════════════════════════════════════════════
+// CONSTANTS
+// ══════════════════════════════════════════════════════════════════════════
+const CIRC = 2 * Math.PI * 47;
 const COLORS = {
   inhale: getComputedStyle(document.documentElement).getPropertyValue('--inhale-color').trim(),
   exhale: getComputedStyle(document.documentElement).getPropertyValue('--exhale-color').trim(),
 };
 
-// ── Elements ───────────────────────────────────────────────────────────────
-const connPill   = document.getElementById('conn-pill');
-const bleBtn     = document.getElementById('ble-btn');
+// ══════════════════════════════════════════════════════════════════════════
+// ELEMENTS
+// ══════════════════════════════════════════════════════════════════════════
+const connPill       = document.getElementById('conn-pill');
+const bleBtn         = document.getElementById('ble-btn');
 const relayKeywordEl = document.getElementById('relay-keyword');
 const relaySearchBtn = document.getElementById('relay-search-btn');
 const relaySelectEl  = document.getElementById('relay-select');
-const relayConnectBtn = document.getElementById('relay-connect-btn');
-const relayStopBtn = document.getElementById('relay-stop-btn');
-const bpmEl      = document.getElementById('bpm-value');
-const hrvEl      = document.getElementById('hrv-value');
-const cycleEl    = document.getElementById('cycle-value');
-const timerEl    = document.getElementById('timer-value');
-const circleEl   = document.getElementById('breath-circle');
-const phaseEl    = document.getElementById('phase-text');
-const arcFill    = document.getElementById('arc-fill');
-const ringEl     = document.getElementById('ring-el');
-const segInhale  = document.getElementById('seg-inhale');
-const segExhale  = document.getElementById('seg-exhale');
-const fillInhale = document.getElementById('fill-inhale');
-const fillExhale = document.getElementById('fill-exhale');
-const lblInhale  = document.getElementById('lbl-inhale');
-const lblExhale  = document.getElementById('lbl-exhale');
-const sparkSvg   = document.getElementById('bpm-sparkline');
-const doneBanner = document.getElementById('session-done');
+const relayConnectBtn= document.getElementById('relay-connect-btn');
+const relayStopBtn   = document.getElementById('relay-stop-btn');
 
-// ── Breathing state ────────────────────────────────────────────────────────
+const startScreen    = document.getElementById('start-screen');
+const trainingScreen = document.getElementById('training-screen');
+const doneBanner     = document.getElementById('session-done');
+
+const cfgUsername    = document.getElementById('cfg-username');
+const cfgCycle       = document.getElementById('cfg-cycle');
+const cfgDuration    = document.getElementById('cfg-duration');
+const cfgAdaptive    = document.getElementById('cfg-adaptive');
+const startBtn       = document.getElementById('start-btn');
+
+const bpmEl     = document.getElementById('bpm-value');
+const hrvEl     = document.getElementById('hrv-value');
+const lfEl      = document.getElementById('lf-value');
+const cycleEl   = document.getElementById('cycle-value');
+const timerEl   = document.getElementById('timer-value');
+const circleEl  = document.getElementById('breath-circle');
+const phaseEl   = document.getElementById('phase-text');
+const arcFill   = document.getElementById('arc-fill');
+const ringEl    = document.getElementById('ring-el');
+const segInhale = document.getElementById('seg-inhale');
+const segExhale = document.getElementById('seg-exhale');
+const fillInhale= document.getElementById('fill-inhale');
+const fillExhale= document.getElementById('fill-exhale');
+const lblInhale = document.getElementById('lbl-inhale');
+const lblExhale = document.getElementById('lbl-exhale');
+const sparkSvg  = document.getElementById('bpm-sparkline');
+const footerEl  = document.getElementById('footer-text');
+
+const saveBtn    = document.getElementById('save-btn');
+const restartBtn = document.getElementById('restart-btn');
+const saveStatus = document.getElementById('save-status');
+
+// ══════════════════════════════════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════════════════════════════════
 let cycle = { inhale: 5.0, exhale: 5.0, total: 10.0 };
-let animFrame  = null;
-let phaseStart = null;
-let currentPhase = 'inhale';   // 'inhale' | 'exhale'
-let pendingCycle = null;
-let idleMode = true;
-let sessionRemaining = 600;    // seconds; updated from server
+let animFrame   = null;
+let phaseStart  = null;
+let currentPhase= 'inhale';
+let pendingCycle= null;
+let idleMode    = true;
+let sessionRemaining = 120;
+let sessionDuration  = 120;
+let sessionActive    = false;
+let timerInterval    = null;
 
-// ── BPM history ────────────────────────────────────────────────────────────
-const bpmHistory = [];
+const bpmHistory  = [];
 const MAX_HISTORY = 60;
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════
+// HELPERS
+// ══════════════════════════════════════════════════════════════════════════
 function lerp(a, b, t) { return a + (b - a) * t; }
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 function easeInOut(t) { return t < 0.5 ? 2*t*t : -1 + (4 - 2*t)*t; }
-
 function phaseDuration() { return cycle[currentPhase] * 1000; }
-
 function nextPhase(p) { return p === 'inhale' ? 'exhale' : 'inhale'; }
-
 function formatTime(sec) {
   const m = Math.floor(sec / 60);
   const s = Math.floor(sec % 60);
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-// ── Session timer (client-side interpolation) ─────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════
+// SCREEN MANAGEMENT
+// ══════════════════════════════════════════════════════════════════════════
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// SESSION TIMER
+// ══════════════════════════════════════════════════════════════════════════
 let lastTimerSync = Date.now();
 
 function tickTimer() {
+  if (!sessionActive) return;
   if (sessionRemaining <= 0) {
     timerEl.textContent = '0:00';
-    doneBanner.classList.add('visible');
+    onSessionComplete();
     return;
   }
   const now = Date.now();
   const elapsed = (now - lastTimerSync) / 1000;
   const display = Math.max(0, sessionRemaining - elapsed);
   timerEl.textContent = formatTime(display);
-  if (display <= 0) doneBanner.classList.add('visible');
-  setTimeout(tickTimer, 500);
+  if (display <= 0) onSessionComplete();
 }
 
-// ── Color theme per phase ─────────────────────────────────────────────────
+function startTimerTick() {
+  if (timerInterval) clearInterval(timerInterval);
+  timerInterval = setInterval(tickTimer, 500);
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// BREATHING ANIMATION
+// ══════════════════════════════════════════════════════════════════════════
 const SCALE = { inhale: 1.42, exhale: 0.72 };
 
 function applyPhaseColor(phase) {
@@ -440,13 +617,12 @@ function applyPhaseColor(phase) {
   circleEl.style.setProperty('--circle-color', c);
   circleEl.style.background = `radial-gradient(circle at 35% 35%, ${c}, #1a2433)`;
   circleEl.style.boxShadow  = `0 0 40px 6px ${c}`;
-  ringEl.style.color        = c;
-  arcFill.style.stroke      = c;
-  phaseEl.style.color       = c;
-  phaseEl.textContent       = phase === 'inhale' ? 'Inhale' : 'Exhale';
+  ringEl.style.color   = c;
+  arcFill.style.stroke = c;
+  phaseEl.style.color  = c;
+  phaseEl.textContent  = phase === 'inhale' ? '吸气' : '呼气';
 }
 
-// ── Timeline ──────────────────────────────────────────────────────────────
 function layoutTimeline() {
   const total  = cycle.total;
   const totalW = document.getElementById('timeline').clientWidth - 4;
@@ -454,7 +630,7 @@ function layoutTimeline() {
     const w = Math.round(totalW * cycle[key] / total);
     el.style.width  = w + 'px';
     lbl.style.width = w + 'px';
-    lbl.textContent = `${key.charAt(0).toUpperCase()+key.slice(1)} ${cycle[key]}s`;
+    lbl.textContent = `${key === 'inhale' ? '吸气' : '呼气'} ${cycle[key]}s`;
   });
 }
 
@@ -469,7 +645,6 @@ function updateTimelineFills(phase) {
   el.style.transform  = 'scaleX(1)';
 }
 
-// ── Main animation loop ───────────────────────────────────────────────────
 function startPhase(phase, ts) {
   currentPhase = phase;
   phaseStart   = ts;
@@ -479,23 +654,19 @@ function startPhase(phase, ts) {
 
 function animate(ts) {
   animFrame = requestAnimationFrame(animate);
-
   const elapsed  = ts - phaseStart;
   const duration = phaseDuration();
   const progress = clamp(elapsed / duration, 0, 1);
 
-  // Arc covers full cycle
   const phaseOffset = currentPhase === 'inhale' ? 0 : cycle.inhale * 1000;
   const cycleProgress = clamp((phaseOffset + elapsed) / (cycle.total * 1000), 0, 1);
   arcFill.style.strokeDashoffset = CIRC * (1 - cycleProgress);
 
-  // Circle scale
   const scale = currentPhase === 'inhale'
     ? lerp(SCALE.exhale, SCALE.inhale, easeInOut(progress))
     : lerp(SCALE.inhale, SCALE.exhale, easeInOut(progress));
   circleEl.style.transform = `scale(${scale.toFixed(3)})`;
 
-  // Phase transition
   if (progress >= 1) {
     const next = nextPhase(currentPhase);
     if (next === 'inhale' && pendingCycle) {
@@ -521,19 +692,21 @@ function startBreathing() {
 function showIdle() {
   if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
   idleMode = true;
-  circleEl.style.transform = 'scale(1)';
-  circleEl.style.animation = 'idle-pulse 3s ease-in-out infinite';
+  circleEl.style.transform  = 'scale(1)';
+  circleEl.style.animation  = 'idle-pulse 3s ease-in-out infinite';
   arcFill.style.strokeDashoffset = CIRC;
-  phaseEl.textContent = 'Waiting for sensor…';
+  phaseEl.textContent = '等待传感器…';
   phaseEl.style.color = 'var(--muted)';
   ringEl.style.color  = 'var(--muted)';
 }
 
-// ── Sparkline ─────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════
+// SPARKLINE
+// ══════════════════════════════════════════════════════════════════════════
 function updateSparkline() {
   if (bpmHistory.length < 2) return;
-  const W = sparkSvg.clientWidth || 400;
-  const H = 60;
+  const W  = sparkSvg.clientWidth || 400;
+  const H  = 60;
   const lo = Math.min(...bpmHistory) - 5;
   const hi = Math.max(...bpmHistory) + 5;
   const xStep = W / (MAX_HISTORY - 1);
@@ -545,11 +718,13 @@ function updateSparkline() {
   sparkSvg.innerHTML = `
     <polyline points="${pts}" fill="none" stroke="var(--red)" stroke-width="1.5"
       stroke-linecap="round" stroke-linejoin="round" opacity="0.8"/>
-    <text x="4" y="12"      fill="var(--muted)" font-size="9">${Math.round(hi-5)} bpm</text>
-    <text x="4" y="${H-3}"  fill="var(--muted)" font-size="9">${Math.round(lo+5)} bpm</text>`;
+    <text x="4" y="12"     fill="var(--muted)" font-size="9">${Math.round(hi-5)} bpm</text>
+    <text x="4" y="${H-3}" fill="var(--muted)" font-size="9">${Math.round(lo+5)} bpm</text>`;
 }
 
-// ── SSE connection ─────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════
+// SSE
+// ══════════════════════════════════════════════════════════════════════════
 let sseRetryDelay = 2000;
 
 function connectSSE() {
@@ -558,28 +733,39 @@ function connectSSE() {
   es.onopen = () => {
     sseRetryDelay = 2000;
     connPill.className   = 'pill pill-waiting';
-    connPill.textContent = 'Connected – awaiting data…';
+    connPill.textContent = '已连接 – 等待数据…';
   };
 
   es.onmessage = (ev) => {
     const data = JSON.parse(ev.data);
-    const { bpm, hrv_rmssd, total, inhale, exhale, session_remaining } = data;
+    const { bpm, hrv_rmssd, lf_power, total, inhale, exhale, session_remaining, session_duration, active } = data;
 
+    // Update display values
     bpmEl.textContent   = bpm > 0 ? bpm.toFixed(1) : '––';
     hrvEl.textContent   = hrv_rmssd != null ? hrv_rmssd.toFixed(1) : '––';
+    lfEl.textContent    = lf_power != null ? lf_power.toFixed(3) : '––';
     cycleEl.textContent = total ? total.toFixed(1) : '––';
 
     // Sync session timer
     if (session_remaining !== undefined) {
-      sessionRemaining  = session_remaining;
-      lastTimerSync     = Date.now();
-      if (session_remaining <= 0) doneBanner.classList.add('visible');
+      sessionRemaining = session_remaining;
+      lastTimerSync    = Date.now();
+    }
+    if (session_duration !== undefined) {
+      sessionDuration = session_duration;
+    }
+
+    // Only animate during active session
+    if (!sessionActive) return;
+
+    if (session_remaining !== undefined && session_remaining <= 0) {
+      onSessionComplete();
+      return;
     }
 
     if (bpm > 0) {
       connPill.className   = 'pill pill-connected';
       connPill.textContent = 'Live ♥';
-
       bpmHistory.push(bpm);
       if (bpmHistory.length > MAX_HISTORY) bpmHistory.shift();
       updateSparkline();
@@ -593,82 +779,180 @@ function connectSSE() {
   es.onerror = () => {
     es.close();
     connPill.className   = 'pill pill-disconnected';
-    connPill.textContent = 'Disconnected – retrying…';
+    connPill.textContent = '断开 – 重连中…';
     setTimeout(connectSSE, sseRetryDelay);
     sseRetryDelay = Math.min(sseRetryDelay * 1.5, 15000);
   };
 }
 
-// ── Reset session ──────────────────────────────────────────────────────────
-async function resetSession() {
-  await fetch('/api/reset', { method: 'POST' });
-  doneBanner.classList.remove('visible');
-  sessionRemaining = 600;
+// ══════════════════════════════════════════════════════════════════════════
+// SESSION LIFECYCLE
+// ══════════════════════════════════════════════════════════════════════════
+async function startSession() {
+  // Read config from form
+  const breathCycle = parseFloat(cfgCycle.value) || 10;
+  const duration    = parseInt(cfgDuration.value) || 120;
+  const adaptive    = cfgAdaptive.checked;
+  const username    = cfgUsername.value.trim();
+
+  // Send config to server
+  await fetch('/api/configure', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      breath_cycle: breathCycle,
+      session_duration: duration,
+      adaptive: adaptive,
+      username: username,
+    })
+  });
+
+  // Start session on server
+  await fetch('/api/start', { method: 'POST' });
+
+  // Local state
+  sessionDuration  = duration;
+  sessionRemaining = duration;
   lastTimerSync    = Date.now();
+  sessionActive    = true;
+  bpmHistory.length = 0;
+
+  // Set initial cycle from config
+  const half = breathCycle / 2;
+  cycle = { inhale: half, exhale: half, total: breathCycle };
+
+  // Switch UI
+  showScreen('training-screen');
+  timerEl.textContent = formatTime(duration);
+  footerEl.textContent = `呼吸训练 · ${duration}s · 周期 ${breathCycle}s`;
+  doneBanner.classList.remove('visible');
+
+  // Start breathing animation immediately (uses configured cycle, no data dependency)
+  startBreathing();
+  startTimerTick();
 }
 
-// ── Init ──────────────────────────────────────────────────────────────────
-showIdle();
-connectSSE();
-tickTimer();
-window.addEventListener('resize', () => { if (!idleMode) layoutTimeline(); });
+async function onSessionComplete() {
+  if (!sessionActive) return;
+  sessionActive = false;
+  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+  timerEl.textContent = '0:00';
 
-// ── Web Bluetooth Logic ───────────────────────────────────────────────────
+  // Stop session on server
+  await fetch('/api/stop', { method: 'POST' });
+
+  // Get session summary from server
+  try {
+    const resp = await fetch('/api/status');
+    const data = await resp.json();
+    // These are live values; full summary comes from save
+  } catch(e) { /* ignore */ }
+
+  // Show done overlay with placeholder (will fill on save)
+  document.getElementById('sum-bpm-avg').textContent = bpmEl.textContent;
+  document.getElementById('sum-rmssd').textContent   = hrvEl.textContent;
+  document.getElementById('sum-lf').textContent      = lfEl.textContent;
+  document.getElementById('sum-bpm-max').textContent = '––';
+  document.getElementById('sum-bpm-min').textContent = '––';
+  document.getElementById('sum-rr-count').textContent= '––';
+  saveStatus.textContent = '';
+  doneBanner.classList.add('visible');
+}
+
+async function saveSessionData() {
+  saveBtn.disabled = true;
+  saveStatus.textContent = '保存中…';
+  try {
+    const resp = await fetch('/api/save_session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: cfgUsername.value.trim() })
+    });
+    const result = await resp.json();
+    if (result.ok) {
+      const s = result.summary;
+      document.getElementById('sum-bpm-avg').textContent  = s.bpm_avg != null ? s.bpm_avg.toFixed(1) : '––';
+      document.getElementById('sum-bpm-max').textContent  = s.bpm_max != null ? s.bpm_max.toFixed(1) : '––';
+      document.getElementById('sum-bpm-min').textContent  = s.bpm_min != null ? s.bpm_min.toFixed(1) : '––';
+      document.getElementById('sum-rmssd').textContent    = s.hrv_rmssd != null ? s.hrv_rmssd.toFixed(1) : '––';
+      document.getElementById('sum-lf').textContent       = s.lf_power != null ? s.lf_power.toFixed(4) : '––';
+      document.getElementById('sum-rr-count').textContent = s.rr_count || 0;
+      saveStatus.textContent = `已保存: ${result.file}`;
+      saveStatus.style.color = 'var(--green)';
+    } else {
+      saveStatus.textContent = '保存失败';
+      saveStatus.style.color = 'var(--red)';
+    }
+  } catch(e) {
+    saveStatus.textContent = '保存失败: ' + e.message;
+    saveStatus.style.color = 'var(--red)';
+  }
+  saveBtn.disabled = false;
+}
+
+async function restartSession() {
+  await fetch('/api/reset', { method: 'POST' });
+  doneBanner.classList.remove('visible');
+  sessionActive = false;
+  showIdle();
+  showScreen('start-screen');
+  footerEl.textContent = 'HeartBeat 呼吸训练 · 连接设备后开始';
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// EVENT LISTENERS
+// ══════════════════════════════════════════════════════════════════════════
+startBtn.addEventListener('click', startSession);
+saveBtn.addEventListener('click', saveSessionData);
+restartBtn.addEventListener('click', restartSession);
+
+// ══════════════════════════════════════════════════════════════════════════
+// WEB BLUETOOTH
+// ══════════════════════════════════════════════════════════════════════════
 const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
-const DEVICE_NAME = "HeartBeat-ESP32";
+const DEVICE_NAME  = "HeartBeat-ESP32";
 const CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 
 let lastBeatTime = 0;
 const ibiBuffer = [];
 const IBI_BUFFER_SIZE = 10;
 let lastPostTime = 0;
-const POST_INTERVAL = 1000; // ms
+const POST_INTERVAL = 1000;
 
 function computeRMSSD(ibis) {
   if (ibis.length < 2) return null;
   let sumSqDiff = 0;
   for (let i = 1; i < ibis.length; i++) {
-    const diff = (ibis[i] - ibis[i-1]) * 1000; // convert to ms
+    const diff = (ibis[i] - ibis[i-1]) * 1000;
     sumSqDiff += diff * diff;
   }
   return Math.sqrt(sumSqDiff / (ibis.length - 1));
 }
 
 async function onBeat() {
-  const now = Date.now() / 1000; // seconds
+  const now = Date.now() / 1000;
   if (lastBeatTime > 0) {
     const ibi = now - lastBeatTime;
-    // Filter unreasonable beats (30–240 BPM range: 0.25s–2.0s)
     if (ibi > 0.25 && ibi < 2.0) {
       ibiBuffer.push(ibi);
-      if (ibiBuffer.length > IBI_BUFFER_SIZE) {
-        ibiBuffer.shift();
-      }
-
+      if (ibiBuffer.length > IBI_BUFFER_SIZE) ibiBuffer.shift();
       const avgIbi = ibiBuffer.reduce((a, b) => a + b, 0) / ibiBuffer.length;
-      const bpm = Math.round(60.0 / avgIbi);
-      const rmssd = computeRMSSD(ibiBuffer);
-
+      const bpm    = Math.round(60.0 / avgIbi);
+      const rmssd  = computeRMSSD(ibiBuffer);
       console.log(`[BLE] BEAT! IBI=${ibi.toFixed(3)}s BPM=${bpm} RMSSD=${rmssd ? rmssd.toFixed(1) : '--'}`);
-
-      // Anti-spam for POST requests
       if ((Date.now() - lastPostTime) >= POST_INTERVAL) {
         try {
-          const payload = { bpm: bpm };
-          if (rmssd !== null) {
-            payload.hrv_rmssd = parseFloat(rmssd.toFixed(2));
-          }
-          // Fire and forget
+          const payload = { bpm };
+          // Send raw RR intervals (in ms) for server-side HRV computation
+          payload.rr_intervals = ibiBuffer.map(x => Math.round(x * 1000));
+          if (rmssd !== null) payload.hrv_rmssd = parseFloat(rmssd.toFixed(2));
           fetch('/api/pulse', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
           }).catch(e => console.error("Post error:", e));
-          
           lastPostTime = Date.now();
-        } catch (e) {
-          console.error("Error processing beat:", e);
-        }
+        } catch (e) { console.error("Error processing beat:", e); }
       }
     }
   }
@@ -679,81 +963,70 @@ function handleCharacteristicValueChanged(event) {
   const value = event.target.value;
   const decoder = new TextDecoder('utf-8');
   const text = decoder.decode(value).trim();
-  // Depending on how the ESP32 sends it (sometimes null-terminated or with garbage), trim is good.
-  // The Arduino code sends "BEAT" (std::string), which might not include null terminator if using setValue(std::string).
-  // `pCharacteristic->setValue(msg)` uses the string length.
-  // So it should be exactly "BEAT".
-  if (text.includes("BEAT")) {
-    onBeat();
-  }
+  if (text.includes("BEAT")) onBeat();
 }
 
 bleBtn.addEventListener('click', async () => {
   try {
     if (!navigator.bluetooth) {
-      alert('Web Bluetooth is not supported in this browser/context. Try Chrome on Android or Desktop. Ensure you are using HTTPS (or localhost).');
+      alert('Web Bluetooth 不支持此浏览器。请使用 Chrome（桌面或 Android），确保使用 HTTPS 或 localhost。');
       return;
     }
-
-    console.log('Requesting Bluetooth Device...');
     const device = await navigator.bluetooth.requestDevice({
       filters: [{ name: DEVICE_NAME }],
       optionalServices: [SERVICE_UUID]
     });
-
-    console.log('Connecting to GATT Server...');
     const server = await device.gatt.connect();
-
-    console.log('Getting Service...');
     const service = await server.getPrimaryService(SERVICE_UUID);
-
-    console.log('Getting Characteristic...');
     const characteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
-
-    console.log('Starting Notifications...');
     await characteristic.startNotifications();
     characteristic.addEventListener('characteristicvaluechanged', handleCharacteristicValueChanged);
-    
-    bleBtn.textContent = 'BLE Connected';
+    bleBtn.textContent = 'BLE 已连接';
     bleBtn.style.borderColor = 'var(--green)';
     bleBtn.style.color = 'var(--green)';
-    bleBtn.disabled = true; // Prevent multiple connections
-
+    bleBtn.disabled = true;
   } catch (error) {
-    console.log('Argh! ' + error);
-    alert('BLE Connection failed: ' + error);
+    alert('BLE 连接失败: ' + error);
   }
 });
 
+// ══════════════════════════════════════════════════════════════════════════
+// RELAY
+// ══════════════════════════════════════════════════════════════════════════
 async function refreshRelayStatus() {
   const resp = await fetch('/api/relay/status');
   const data = await resp.json();
   const running = !!data.running;
   relayConnectBtn.disabled = running;
-  relayStopBtn.disabled = !running;
-  if (running) {
-    relayConnectBtn.textContent = `Relay Running (${data.device_name_keyword || ''})`;
-  } else {
-    relayConnectBtn.textContent = 'Connect Relay';
-  }
+  relayStopBtn.disabled    = !running;
+  relayConnectBtn.textContent = running
+    ? `Relay 运行中 (${data.device_name_keyword || ''})`
+    : '连接 Relay';
 }
 
 relaySearchBtn.addEventListener('click', async () => {
-  const keyword = relayKeywordEl.value.trim();
-  const resp = await fetch(`/api/relay/search?keyword=${encodeURIComponent(keyword)}`);
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ error: 'relay search failed' }));
-    alert(err.error || 'relay search failed');
-    return;
+  relaySearchBtn.textContent = '搜索中…';
+  relaySearchBtn.disabled = true;
+  try {
+    const keyword = relayKeywordEl.value.trim();
+    const resp = await fetch(`/api/relay/search?keyword=${encodeURIComponent(keyword)}`);
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: '搜索失败' }));
+      alert(err.error || '搜索失败');
+      return;
+    }
+    const data = await resp.json();
+    relaySelectEl.innerHTML = '';
+    (data.devices || []).forEach((d) => {
+      const opt = document.createElement('option');
+      opt.value = d.name;
+      opt.textContent = `${d.name} (${d.address})`;
+      relaySelectEl.appendChild(opt);
+    });
+  } finally {
+    relaySearchBtn.textContent = '搜索设备';
+    relaySearchBtn.disabled = false;
   }
-  const data = await resp.json();
-  relaySelectEl.innerHTML = '';
-  (data.devices || []).forEach((d) => {
-    const opt = document.createElement('option');
-    opt.value = d.name;
-    opt.textContent = `${d.name} (${d.address})`;
-    relaySelectEl.appendChild(opt);
-  });
 });
 
 relayConnectBtn.addEventListener('click', async () => {
@@ -764,8 +1037,8 @@ relayConnectBtn.addEventListener('click', async () => {
     body: JSON.stringify({ device_name_keyword: picked })
   });
   if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ error: 'relay connect failed' }));
-    alert(err.error || 'relay connect failed');
+    const err = await resp.json().catch(() => ({ error: '连接失败' }));
+    alert(err.error || '连接失败');
     return;
   }
   await refreshRelayStatus();
@@ -776,7 +1049,12 @@ relayStopBtn.addEventListener('click', async () => {
   await refreshRelayStatus();
 });
 
+// ══════════════════════════════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════════════════════════════
+connectSSE();
 refreshRelayStatus();
+window.addEventListener('resize', () => { if (!idleMode) layoutTimeline(); });
 </script>
 </body>
 </html>
