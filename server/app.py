@@ -19,6 +19,7 @@ from routes.setup import setup_bp
 from routes.training import training_bp
 from routes.results import results_bp
 from routes.relay import relay_bp
+from routes.buteyko import buteyko_bp
 
 app = Flask(__name__)
 CORS(app)
@@ -28,6 +29,7 @@ app.register_blueprint(setup_bp)
 app.register_blueprint(training_bp)
 app.register_blueprint(results_bp)
 app.register_blueprint(relay_bp)
+app.register_blueprint(buteyko_bp)
 
 
 @app.route("/")

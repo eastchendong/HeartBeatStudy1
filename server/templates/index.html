@@ -360,7 +360,145 @@
     border-color: var(--accent);
   }
   .done-actions .primary-btn:hover { opacity: 0.85; color: #fff; }
+
+  /* ── MODE TABS ───────────────────────────────────────────────────────── */
+  .mode-tabs {
+    display: flex;
+    gap: 0.5rem;
+    width: 90vw;
+    max-width: 480px;
+  }
+  .mode-tab {
+    flex: 1;
+    padding: 0.65em 1em;
+    border-radius: 10px;
+    border: 2px solid var(--border);
+    background: var(--surface);
+    color: var(--muted);
+    font-size: 0.92rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .mode-tab.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(88,166,255,0.08);
+  }
+  .mode-tab:hover:not(.active) { border-color: var(--muted); color: var(--text); }
+
+  /* ── BOLT TIMER ──────────────────────────────────────────────────────── */
+  .bolt-timer-display {
+    font-size: 5rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--yellow);
+    text-align: center;
+    margin: 1.2rem 0;
+    letter-spacing: -0.02em;
+    line-height: 1;
+  }
+  .bolt-steps {
+    color: var(--muted);
+    font-size: 0.88rem;
+    line-height: 1.9;
+    padding-left: 1.3rem;
+    margin-bottom: 1rem;
+  }
+  .bolt-steps strong { color: var(--text); }
+
+  /* ── HOLD OVERLAY ────────────────────────────────────────────────────── */
+  #hold-overlay {
+    display: none;
+    position: absolute;
+    text-align: center;
+    z-index: 10;
+    flex-direction: column;
+    align-items: center;
+  }
+  #hold-countdown {
+    font-size: 3.5rem;
+    font-weight: 700;
+    color: var(--yellow);
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+  #hold-sub {
+    font-size: 0.72rem;
+    color: var(--muted);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-top: 0.3rem;
+  }
+
+  /* ── EMERGENCY BUTTON ────────────────────────────────────────────────── */
+  #emergency-btn {
+    display: none;
+    padding: 0.75em 2em;
+    border-radius: 10px;
+    border: 2px solid var(--red);
+    background: rgba(248,81,73,0.12);
+    color: var(--red);
+    font-size: 1.05rem;
+    font-weight: 700;
+    cursor: pointer;
+    letter-spacing: 0.04em;
+    transition: all 0.2s;
+    animation: pulse-border 1.5s ease-in-out infinite;
+  }
+  #emergency-btn:hover { background: rgba(248,81,73,0.28); }
+  @keyframes pulse-border {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(248,81,73,0.4); }
+    50%       { box-shadow: 0 0 0 8px rgba(248,81,73,0); }
+  }
+
+  /* ── ROUND PROGRESS & PHASE BADGE ───────────────────────────────────── */
+  #round-counter {
+    display: none;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--accent);
+  }
+  #buteyko-phase-label {
+    display: none;
+    font-size: 0.82rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0.2em 0.9em;
+  }
+
+  /* ── BUTEYKO DONE OVERLAY ────────────────────────────────────────────── */
+  #buteyko-done {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(13,17,23,0.94);
+    align-items: center; justify-content: center;
+    flex-direction: column;
+    gap: 1.2rem;
+    z-index: 100;
+    padding: 2rem;
+    overflow-y: auto;
+  }
+  #buteyko-done.visible { display: flex; }
+  #buteyko-done h2 { font-size: 2rem; color: var(--green); }
+  .rounds-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  .rounds-table th {
+    color: var(--muted); font-size: 0.72rem; text-transform: uppercase;
+    letter-spacing: 0.06em; padding: 0.4em 0.6em;
+    border-bottom: 1px solid var(--border); text-align: left;
+  }
+  .rounds-table td {
+    padding: 0.45em 0.6em;
+    border-bottom: 1px solid var(--border);
+    font-variant-numeric: tabular-nums;
+  }
+  .rounds-table .flag { color: var(--red); font-size: 0.75rem; margin-left: 0.3em; }
 </style>
+
 </head>
 <body>
 
@@ -384,8 +522,15 @@
 <!-- ═══════════════════ START SCREEN ═══════════════════ -->
 <main>
 <div id="start-screen" class="screen active">
-  <div class="setup-card">
-    <h2>训练设置</h2>
+  <!-- Mode selector -->
+  <div class="mode-tabs">
+    <button class="mode-tab active" id="tab-resonance">❤️ 共振呼吸</button>
+    <button class="mode-tab" id="tab-buteyko">🌬️ 布捷伊科屏气</button>
+  </div>
+
+  <!-- Resonance breathing setup card -->
+  <div class="setup-card" id="resonance-card">
+    <h2>共振呼吸设置</h2>
 
     <div class="form-group">
       <label for="cfg-username">用户名（可选）</label>
@@ -417,10 +562,47 @@
 
     <button id="start-btn">开始训练</button>
   </div>
+
+  <!-- Buteyko setup card -->
+  <div class="setup-card" id="buteyko-card" style="display:none">
+    <h2>布捷伊科屏气训练</h2>
+    <p class="hint" style="margin-bottom:1.2rem">训练前将进行 BOLT 测试（最大舒适屏气时长），训练中每轮目标屏气 = BOLT × 50%。</p>
+
+    <div class="form-group">
+      <label for="b-cfg-inhale">吸气时长 (秒)</label>
+      <input type="number" id="b-cfg-inhale" value="4" min="2" max="10"/>
+    </div>
+    <div class="form-group">
+      <label for="b-cfg-exhale">呼气时长 (秒)</label>
+      <input type="number" id="b-cfg-exhale" value="6" min="2" max="15"/>
+    </div>
+    <div class="form-group">
+      <label for="b-cfg-pre">屏气前呼吸次数</label>
+      <input type="number" id="b-cfg-pre" value="4" min="2" max="10"/>
+    </div>
+    <div class="form-group">
+      <label for="b-cfg-post">屏气后恢复呼吸次数</label>
+      <input type="number" id="b-cfg-post" value="4" min="2" max="10"/>
+    </div>
+    <div class="form-group">
+      <label for="b-cfg-rounds">屏气轮数</label>
+      <input type="number" id="b-cfg-rounds" value="5" min="1" max="20"/>
+    </div>
+
+    <button id="bolt-test-btn" style="width:100%;padding:0.75em;border:none;border-radius:10px;background:var(--accent);color:#fff;font-size:1.05rem;font-weight:600;cursor:pointer;margin-top:0.5rem">
+      下一步：BOLT 测试 →
+    </button>
+  </div>
 </div>
 
 <!-- ═══════════════════ TRAINING SCREEN ═══════════════════ -->
 <div id="training-screen" class="screen">
+  <!-- Buteyko-only: round counter + phase badge -->
+  <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;justify-content:center">
+    <div id="round-counter"></div>
+    <div id="buteyko-phase-label"></div>
+  </div>
+
   <div class="stats">
     <div class="stat">
       <div class="value" id="bpm-value">––</div>
@@ -452,7 +634,15 @@
     </svg>
     <div id="breath-circle"></div>
     <span id="phase-text">–</span>
+    <!-- Buteyko hold overlay (shown instead of phase-text during hold) -->
+    <div id="hold-overlay">
+      <div id="hold-countdown">0</div>
+      <div id="hold-sub">屏气中</div>
+    </div>
   </div>
+
+  <!-- Emergency button (Buteyko hold phase only) -->
+  <button id="emergency-btn">🚨 立即呼吸</button>
 
   <div class="timeline" id="timeline">
     <div class="timeline-seg" data-phase="inhale" id="seg-inhale"><div class="fill" id="fill-inhale"></div></div>
@@ -470,7 +660,59 @@
 </div>
 </main>
 
-<footer id="footer-text">
+<!-- ═══════════════════ BOLT TEST SCREEN ═══════════════════ -->
+<div id="buteyko-bolt-screen" class="screen" style="min-height:70vh">
+  <div class="setup-card">
+    <h2>BOLT 测试</h2>
+    <ol class="bolt-steps">
+      <li>以自然鼻呼吸 <strong>3 次</strong></li>
+      <li>最后一次<strong>呼气末</strong>，捏住鼻孔开始屏气</li>
+      <li>出现明显呼吸欲望或膈肌跳动时，松开鼻孔停止屏气</li>
+      <li>屏气时长即为你的 <strong>BOLT 值</strong></li>
+    </ol>
+    <div class="bolt-timer-display" id="bolt-display">0.0</div>
+    <div id="bolt-status-text" style="text-align:center;color:var(--muted);font-size:0.9rem;margin-bottom:1rem">准备好后点击"开始屏气"</div>
+    <div class="done-actions">
+      <button id="bolt-start-btn" class="primary-btn">开始屏气</button>
+      <button id="bolt-end-btn" class="primary-btn" style="display:none;background:var(--red);border-color:var(--red)">停止屏气</button>
+    </div>
+    <div style="text-align:center;margin-top:1rem">
+      <button id="bolt-skip-btn" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:0.8rem;text-decoration:underline">跳过（手动输入 BOLT 值）</button>
+    </div>
+    <div id="bolt-manual-wrap" style="display:none;margin-top:1rem">
+      <div class="form-group">
+        <label>手动输入 BOLT (秒)</label>
+        <input type="number" id="bolt-manual-val" value="20" min="3" max="120"/>
+      </div>
+      <button id="bolt-manual-confirm" style="width:100%;padding:0.65em;border:none;border-radius:8px;background:var(--accent);color:#fff;font-weight:600;cursor:pointer">确认 BOLT 值</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ BUTEYKO CONFIG CONFIRM SCREEN ═══════════════════ -->
+<div id="buteyko-config-screen" class="screen" style="min-height:70vh">
+  <div class="setup-card">
+    <h2>训练参数确认</h2>
+    <div class="summary-card" style="margin-bottom:1.5rem">
+      <div class="summary-row"><span class="sk">BOLT 值</span><span class="sv" id="bc-bolt">––</span></div>
+      <div class="summary-row"><span class="sk">目标屏气时长 (≈ BOLT × 50%)</span><span class="sv" id="bc-target-display">––</span></div>
+      <div class="summary-row"><span class="sk">吸气 / 呼气</span><span class="sv" id="bc-breath">––</span></div>
+      <div class="summary-row"><span class="sk">屏气前呼吸次数</span><span class="sv" id="bc-pre">––</span></div>
+      <div class="summary-row"><span class="sk">屏气后恢复次数</span><span class="sv" id="bc-post">––</span></div>
+      <div class="summary-row"><span class="sk">总轮数</span><span class="sv" id="bc-rounds">––</span></div>
+    </div>
+    <div class="form-group">
+      <label for="bc-target-input">调整目标屏气时长 (秒)</label>
+      <input type="number" id="bc-target-input" value="10" min="3" max="60" step="0.5"/>
+      <div class="hint">默认为 BOLT × 50%，可手动微调</div>
+    </div>
+    <div class="done-actions">
+      <button class="primary-btn" id="buteyko-begin-btn">开始训练</button>
+      <button id="buteyko-back-btn">返回设置</button>
+    </div>
+  </div>
+</div>
+
   HeartBeat 呼吸训练 · 连接设备后开始
 </footer>
 
@@ -491,6 +733,34 @@
   </div>
   <div id="save-status" style="font-size:0.82rem;color:var(--muted);margin-top:0.3rem;"></div>
 </div>
+
+<!-- ═══════════════════ BUTEYKO DONE OVERLAY ═══════════════════ -->
+<div id="buteyko-done">
+  <h2>屏气训练完成 ✓</h2>
+  <div class="summary-card" id="b-summary-card">
+    <div class="summary-row"><span class="sk">BOLT 值</span><span class="sv" id="bd-bolt">––</span></div>
+    <div class="summary-row"><span class="sk">平均心率</span><span class="sv" id="bd-bpm">––</span></div>
+  </div>
+  <div class="summary-card" style="max-width:400px;width:90vw;padding:1rem 1.2rem">
+    <table class="rounds-table" id="bd-rounds-table">
+      <thead>
+        <tr>
+          <th>轮次</th>
+          <th>目标 (s)</th>
+          <th>实际 (s)</th>
+          <th>状态</th>
+        </tr>
+      </thead>
+      <tbody id="bd-rounds-body"></tbody>
+    </table>
+  </div>
+  <div class="done-actions">
+    <button class="primary-btn" id="b-save-btn">保存数据</button>
+    <button id="b-restart-btn">重新开始</button>
+  </div>
+  <div id="b-save-status" style="font-size:0.82rem;color:var(--muted);margin-top:0.3rem;"></div>
+</div>
+
 
 <script>
 // ══════════════════════════════════════════════════════════════════════════
@@ -570,6 +840,7 @@ let sessionRemaining = 120;
 let sessionDuration  = 120;
 let sessionActive    = false;
 let timerInterval    = null;
+let onBreathCycleComplete = null;  // hook for Buteyko
 
 const bpmHistory  = [];
 const MAX_HISTORY = 60;
@@ -682,10 +953,14 @@ function animate(ts) {
 
   if (progress >= 1) {
     const next = nextPhase(currentPhase);
-    if (next === 'inhale' && pendingCycle) {
-      cycle = pendingCycle;
-      pendingCycle = null;
-      layoutTimeline();
+    if (next === 'inhale') {
+      // Completed one full breath cycle (inhale+exhale)
+      if (pendingCycle) {
+        cycle = pendingCycle;
+        pendingCycle = null;
+        layoutTimeline();
+      }
+      if (typeof onBreathCycleComplete === 'function') onBreathCycleComplete();
     }
     startPhase(next, ts);
   }
@@ -918,6 +1193,345 @@ async function restartSession() {
 startBtn.addEventListener('click', startSession);
 saveBtn.addEventListener('click', saveSessionData);
 restartBtn.addEventListener('click', restartSession);
+
+// ══════════════════════════════════════════════════════════════════════════
+// MODE TABS
+// ══════════════════════════════════════════════════════════════════════════
+let currentMode = 'resonance';
+
+document.getElementById('tab-resonance').addEventListener('click', () => {
+  currentMode = 'resonance';
+  document.getElementById('tab-resonance').classList.add('active');
+  document.getElementById('tab-buteyko').classList.remove('active');
+  document.getElementById('resonance-card').style.display = '';
+  document.getElementById('buteyko-card').style.display = 'none';
+});
+
+document.getElementById('tab-buteyko').addEventListener('click', () => {
+  currentMode = 'buteyko';
+  document.getElementById('tab-buteyko').classList.add('active');
+  document.getElementById('tab-resonance').classList.remove('active');
+  document.getElementById('buteyko-card').style.display = '';
+  document.getElementById('resonance-card').style.display = 'none';
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// BUTEYKO STATE
+// ══════════════════════════════════════════════════════════════════════════
+const bConfig = { inhale_sec: 4, exhale_sec: 6, pre_hold_breaths: 4, post_hold_breaths: 4, num_rounds: 5, target_hold: null };
+let bBoltSeconds  = null;
+let bBoltStart    = null;
+let bBoltInterval = null;
+let bCurrentRound = 0;
+let bPhase        = null;   // 'pre_breath' | 'hold' | 'post_breath'
+let bBreathsLeft  = 0;
+let bHoldStart    = null;
+let bHoldInterval = null;
+let bRoundResults = [];
+
+// Elements
+const holdOverlay     = document.getElementById('hold-overlay');
+const holdCountdownEl = document.getElementById('hold-countdown');
+const emergencyBtn    = document.getElementById('emergency-btn');
+const roundCounterEl  = document.getElementById('round-counter');
+const bPhaseLabelEl   = document.getElementById('buteyko-phase-label');
+const buteykoDonel    = document.getElementById('buteyko-done');
+
+// ── BOLT TEST ──────────────────────────────────────────────────────────────
+document.getElementById('bolt-test-btn').addEventListener('click', () => {
+  showScreen('buteyko-bolt-screen');
+});
+
+document.getElementById('bolt-start-btn').addEventListener('click', () => {
+  bBoltStart = Date.now();
+  bBoltInterval = setInterval(() => {
+    const elapsed = (Date.now() - bBoltStart) / 1000;
+    document.getElementById('bolt-display').textContent = elapsed.toFixed(1);
+  }, 100);
+  document.getElementById('bolt-start-btn').style.display = 'none';
+  document.getElementById('bolt-end-btn').style.display = '';
+  document.getElementById('bolt-status-text').textContent = '屏气中…';
+});
+
+document.getElementById('bolt-end-btn').addEventListener('click', () => {
+  clearInterval(bBoltInterval);
+  bBoltSeconds = (Date.now() - bBoltStart) / 1000;
+  document.getElementById('bolt-end-btn').style.display = 'none';
+  document.getElementById('bolt-status-text').textContent = `BOLT = ${bBoltSeconds.toFixed(1)}s  ✓`;
+  onBoltComplete(bBoltSeconds);
+});
+
+document.getElementById('bolt-skip-btn').addEventListener('click', () => {
+  document.getElementById('bolt-manual-wrap').style.display = '';
+});
+
+document.getElementById('bolt-manual-confirm').addEventListener('click', () => {
+  const val = parseFloat(document.getElementById('bolt-manual-val').value) || 20;
+  bBoltSeconds = val;
+  onBoltComplete(val);
+});
+
+function onBoltComplete(boltSec) {
+  // Read user's Buteyko form config
+  bConfig.inhale_sec       = parseFloat(document.getElementById('b-cfg-inhale').value) || 4;
+  bConfig.exhale_sec       = parseFloat(document.getElementById('b-cfg-exhale').value) || 6;
+  bConfig.pre_hold_breaths = parseInt(document.getElementById('b-cfg-pre').value)   || 4;
+  bConfig.post_hold_breaths= parseInt(document.getElementById('b-cfg-post').value)  || 4;
+  bConfig.num_rounds       = parseInt(document.getElementById('b-cfg-rounds').value) || 5;
+  bConfig.target_hold      = Math.round(boltSec * 0.5 * 10) / 10;
+
+  // Populate confirm screen
+  document.getElementById('bc-bolt').textContent   = boltSec.toFixed(1) + ' s';
+  document.getElementById('bc-target-display').textContent = bConfig.target_hold + ' s';
+  document.getElementById('bc-breath').textContent = `${bConfig.inhale_sec}s 吸 / ${bConfig.exhale_sec}s 呼`;
+  document.getElementById('bc-pre').textContent    = bConfig.pre_hold_breaths + ' 次';
+  document.getElementById('bc-post').textContent   = bConfig.post_hold_breaths + ' 次';
+  document.getElementById('bc-rounds').textContent = bConfig.num_rounds + ' 轮';
+  document.getElementById('bc-target-input').value = bConfig.target_hold;
+
+  showScreen('buteyko-config-screen');
+}
+
+document.getElementById('buteyko-back-btn').addEventListener('click', () => {
+  showScreen('start-screen');
+});
+
+document.getElementById('buteyko-begin-btn').addEventListener('click', async () => {
+  // Allow user to adjust target
+  bConfig.target_hold = parseFloat(document.getElementById('bc-target-input').value) || bConfig.target_hold;
+
+  // Send config to server
+  await fetch(api('/api/buteyko/configure'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bolt_seconds: bBoltSeconds, target_hold: bConfig.target_hold, ...bConfig })
+  });
+
+  startButeykoTraining();
+});
+
+// ── BUTEYKO TRAINING ───────────────────────────────────────────────────────
+function startButeykoTraining() {
+  bRoundResults = [];
+  bCurrentRound = 0;
+
+  // Show training screen, hide resonance-only elements
+  document.getElementById('timer-value').closest('.stat').style.display = 'none';
+  roundCounterEl.style.display = '';
+  bPhaseLabelEl.style.display  = '';
+
+  showScreen('training-screen');
+  sessionActive = true;
+  bpmHistory.length = 0;
+
+  // Set breathing cycle
+  cycle = { inhale: bConfig.inhale_sec, exhale: bConfig.exhale_sec, total: bConfig.inhale_sec + bConfig.exhale_sec };
+  cycleEl.textContent = cycle.total.toFixed(1);
+  layoutTimeline();
+
+  startNextButeykRound();
+}
+
+function startNextButeykRound() {
+  bCurrentRound++;
+  if (bCurrentRound > bConfig.num_rounds) {
+    onButeykoAllDone();
+    return;
+  }
+  updateRoundCounter();
+  startButeykoPreBreath();
+}
+
+function updateRoundCounter() {
+  roundCounterEl.textContent = `第 ${bCurrentRound} / ${bConfig.num_rounds} 轮`;
+}
+
+function startButeykoPreBreath() {
+  bPhase = 'pre_breath';
+  bBreathsLeft = bConfig.pre_hold_breaths;
+  bPhaseLabelEl.textContent = `准备呼吸 (${bBreathsLeft} 次)`;
+
+  // Show normal animation elements, hide hold UI
+  holdOverlay.style.display = 'none';
+  emergencyBtn.style.display = 'none';
+  phaseEl.style.display = '';
+  document.getElementById('timeline').style.display = '';
+  document.getElementById('timeline-labels').style.display = '';
+
+  onBreathCycleComplete = () => {
+    if (bPhase !== 'pre_breath') return;
+    bBreathsLeft--;
+    bPhaseLabelEl.textContent = `准备呼吸 (${bBreathsLeft} 次)`;
+    if (bBreathsLeft <= 0) {
+      onBreathCycleComplete = null;
+      startButeykoHold();
+    }
+  };
+
+  if (idleMode) {
+    startBreathing();
+  }
+}
+
+function startButeykoHold() {
+  bPhase = 'hold';
+  bPhaseLabelEl.textContent = '屏气 ⏱';
+
+  // Freeze animation at exhale position
+  if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
+  idleMode = false;
+  circleEl.style.transform = `scale(${SCALE.exhale})`;
+  arcFill.style.strokeDashoffset = CIRC;
+  phaseEl.style.display = 'none';
+  document.getElementById('timeline').style.display = 'none';
+  document.getElementById('timeline-labels').style.display = 'none';
+
+  // Show hold overlay and emergency button
+  holdOverlay.style.display = 'flex';
+  emergencyBtn.style.display = '';
+
+  bHoldStart = Date.now();
+  let remaining = bConfig.target_hold;
+  holdCountdownEl.textContent = remaining.toFixed(1);
+
+  bHoldInterval = setInterval(() => {
+    const elapsed = (Date.now() - bHoldStart) / 1000;
+    remaining = Math.max(0, bConfig.target_hold - elapsed);
+    holdCountdownEl.textContent = remaining.toFixed(1);
+    if (remaining <= 0) {
+      endButeykoHold(false);
+    }
+  }, 100);
+}
+
+function endButeykoHold(emergency) {
+  if (bPhase !== 'hold') return;
+  clearInterval(bHoldInterval);
+  bPhase = null;
+
+  const actualSec = Math.round((Date.now() - bHoldStart) / 100) / 10;
+  const targetUsed = bConfig.target_hold;
+
+  // Record result
+  const result = { round: bCurrentRound, target: targetUsed, actual: actualSec, emergency };
+  bRoundResults.push(result);
+
+  // POST to server
+  fetch(api('/api/buteyko/round_result'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(result)
+  }).then(r => r.json()).then(d => {
+    // Server may have updated target_hold (emergency case)
+    if (d.new_target) bConfig.target_hold = d.new_target;
+  }).catch(() => {});
+
+  // Hide hold UI
+  holdOverlay.style.display = 'none';
+  emergencyBtn.style.display = 'none';
+  phaseEl.style.display = '';
+
+  startButeykoPostBreath();
+}
+
+emergencyBtn.addEventListener('click', () => endButeykoHold(true));
+
+function startButeykoPostBreath() {
+  bPhase = 'post_breath';
+  bBreathsLeft = bConfig.post_hold_breaths;
+  bPhaseLabelEl.textContent = `恢复呼吸 (${bBreathsLeft} 次)`;
+
+  document.getElementById('timeline').style.display = '';
+  document.getElementById('timeline-labels').style.display = '';
+
+  onBreathCycleComplete = () => {
+    if (bPhase !== 'post_breath') return;
+    bBreathsLeft--;
+    bPhaseLabelEl.textContent = `恢复呼吸 (${bBreathsLeft} 次)`;
+    if (bBreathsLeft <= 0) {
+      onBreathCycleComplete = null;
+      startNextButeykRound();
+    }
+  };
+
+  // Resume animation
+  idleMode = false;
+  startBreathing();
+}
+
+async function onButeykoAllDone() {
+  sessionActive = false;
+  if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
+
+  // Restore hidden elements for next use
+  document.getElementById('timer-value').closest('.stat').style.display = '';
+  roundCounterEl.style.display = 'none';
+  bPhaseLabelEl.style.display = 'none';
+
+  // Populate Buteyko done overlay
+  document.getElementById('bd-bolt').textContent = bBoltSeconds != null ? bBoltSeconds.toFixed(1) + ' s' : '––';
+  document.getElementById('bd-bpm').textContent  = bpmEl.textContent;
+
+  const tbody = document.getElementById('bd-rounds-body');
+  tbody.innerHTML = '';
+  bRoundResults.forEach(r => {
+    const completed = !r.emergency && r.actual >= r.target * 0.95;
+    const flag = r.emergency ? '<span class="flag">⚡ 紧急</span>' : (completed ? '✓' : '––');
+    tbody.innerHTML += `<tr>
+      <td>第 ${r.round} 轮</td>
+      <td>${r.target != null ? r.target.toFixed(1) : '––'}</td>
+      <td>${r.actual != null ? r.actual.toFixed(1) : '––'}</td>
+      <td>${flag}</td>
+    </tr>`;
+  });
+
+  document.getElementById('b-save-status').textContent = '';
+  document.getElementById('buteyko-done').classList.add('visible');
+}
+
+document.getElementById('b-save-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('b-save-btn');
+  const statusEl = document.getElementById('b-save-status');
+  btn.disabled = true;
+  statusEl.textContent = '保存中…';
+  try {
+    const resp = await fetch(api('/api/buteyko/save'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: document.getElementById('cfg-username').value.trim() })
+    });
+    const result = await resp.json();
+    if (result.ok) {
+      statusEl.textContent = `已保存: ${result.file}`;
+      statusEl.style.color = 'var(--green)';
+    } else {
+      statusEl.textContent = '保存失败';
+      statusEl.style.color = 'var(--red)';
+    }
+  } catch(e) {
+    statusEl.textContent = '保存失败: ' + e.message;
+    statusEl.style.color = 'var(--red)';
+  }
+  btn.disabled = false;
+});
+
+document.getElementById('b-restart-btn').addEventListener('click', async () => {
+  await fetch(api('/api/reset'), { method: 'POST' });
+  document.getElementById('buteyko-done').classList.remove('visible');
+
+  // Reset BOLT screen
+  document.getElementById('bolt-display').textContent = '0.0';
+  document.getElementById('bolt-status-text').textContent = '准备好后点击"开始屏气"';
+  document.getElementById('bolt-start-btn').style.display = '';
+  document.getElementById('bolt-end-btn').style.display = 'none';
+  document.getElementById('bolt-manual-wrap').style.display = 'none';
+
+  sessionActive = false;
+  idleMode = true;
+  showIdle();
+  showScreen('start-screen');
+  footerEl.textContent = 'HeartBeat 呼吸训练 · 连接设备后开始';
+});
 
 // ══════════════════════════════════════════════════════════════════════════
 // WEB BLUETOOTH

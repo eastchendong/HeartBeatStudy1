@@ -59,6 +59,18 @@ class SessionState:
         self.relay_process: Optional[subprocess.Popen] = None
         self.relay_device_keyword: Optional[str] = None
 
+        # ── Buteyko state ──────────────────────────────────────────────────────
+        self.buteyko_config: dict = {
+            "bolt_seconds": None,
+            "target_hold": None,
+            "inhale_sec": 4.0,
+            "exhale_sec": 6.0,
+            "pre_hold_breaths": 4,
+            "post_hold_breaths": 4,
+            "num_rounds": 5,
+        }
+        self.buteyko_rounds: list = []  # [{"round":int, "target":float, "actual":float, "emergency":bool}]
+
 
 # ── Global Session Store ───────────────────────────────────────────────────
 sessions_lock = Lock()
