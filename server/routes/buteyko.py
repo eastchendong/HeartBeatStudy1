@@ -22,6 +22,9 @@ def buteyko_configure():
     sess = get_current_session()
     data = request.get_json(force=True) or {}
     cfg = sess.buteyko_config
+    username = str(data.get('username', '')).strip()[:64]
+    if username:
+        sess.session_config['username'] = username
     for key in ['bolt_seconds', 'target_hold', 'inhale_sec', 'exhale_sec',
                 'pre_hold_breaths', 'post_hold_breaths', 'num_rounds']:
         if key in data:
@@ -61,7 +64,7 @@ def buteyko_save():
     sess = get_current_session()
     data = request.get_json(force=True) or {}
     ts = time.strftime('%Y%m%d_%H%M%S')
-    username = data.get('username') or sess.session_id
+    username = (data.get('username') or sess.session_config.get('username') or sess.session_id).strip()
     fname = f"buteyko_{username}_{ts}.json"
     payload = {
         'session_id': sess.session_id,

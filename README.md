@@ -6,17 +6,21 @@ A three-part system that reads Arduino heart-pulse sensor data and displays an *
 
 ```
 Pulse Sensor → ESP32
-                 ├── WiFi ──────────────── HTTP POST /api/pulse ──▶ Flask server (WSL)
-                 │                                                         │
-                 └── Bluetooth Classic ──▶ Windows Python script           │
-                                              └── HTTP POST /api/pulse ───▶┘
-                                                                           │
-                                                                     SSE /api/stream
-                                                                           │
-                                                                    Browser (breathing guide)
+           ├── WiFi ──────────────── HTTP POST /api/pulse ──▶ Flask server (WSL)
+           │                                                         │
+           └── Bluetooth Classic ──▶ Windows Python script           │
+                         └── HTTP POST /api/pulse ───▶┘
+
+Heart Belt (BLE)
+           ├── Browser Web Bluetooth ─▶ HTTP POST /api/pulse ──────▶ Flask server
+           └── Python relay fallback ─▶ HTTP POST /api/pulse ──────▶ Flask server
+                                       │
+                                    SSE /api/stream
+                                       │
+                                   Browser (breathing guide)
 ```
 
-**Both channels post to the same `/api/pulse` endpoint.** The server deduplicates via its rolling BPM window — extra readings just improve the average.
+**All channels post to the same `/api/pulse` endpoint.** The server deduplicates via its rolling BPM window — extra readings just improve the average.
 
 ---
 
@@ -103,6 +107,23 @@ cd windows
 pip install -r requirements.txt
 python pulse_sender.py --port COM5 --server http://172.30.182.116:5000
 ```
+
+---
+
+## 4 · BLE heart belt in the browser
+
+The intended BLE heart belt path now matches the ESP32 browser flow:
+
+- Open the training page in Chrome or Edge.
+- Use the "连接心电带 (浏览器)" button.
+- The browser connects to the BLE device directly via Web Bluetooth.
+- Decoded heart-rate batches are replayed into `/api/pulse`, and the page continues to consume `/api/stream` as usual.
+
+Notes:
+
+- This requires HTTPS or `localhost` because of Web Bluetooth restrictions.
+- The current browser path assumes the device exposes service `0000ffe0-0000-1000-8000-00805f9b34fb` and the usual FFE notify/write characteristics.
+- The Python relay under `ble-relay-server-python/` remains available as a fallback for environments where Web Bluetooth is unavailable.
 
 ---
 

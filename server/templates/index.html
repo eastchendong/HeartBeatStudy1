@@ -103,6 +103,21 @@
     color: var(--accent);
     text-align: center;
   }
+  #ble-diag-card {
+    max-width: 480px;
+    width: 90vw;
+    padding: 1rem 1.2rem;
+  }
+  #ble-diag-card h3 {
+    font-size: 0.95rem;
+    color: var(--text);
+    margin-bottom: 0.75rem;
+  }
+  #ble-diag-error {
+    color: var(--yellow);
+    word-break: break-word;
+    text-align: left;
+  }
   .form-group {
     margin-bottom: 1.2rem;
   }
@@ -510,11 +525,8 @@
   <div class="header-right">
     <span id="session-id-label" style="font-size:0.7rem;color:var(--muted);padding:0.2em 0.5em;border:1px solid var(--border);border-radius:999px;font-family:monospace;"></span>
     <button id="ble-btn" class="pill">连接传感器 (BLE)</button>
-    <input id="relay-keyword" value="C5AB" title="Relay keyword" style="width:70px"/>
-    <button id="relay-search-btn" class="pill relay-btn">搜索设备</button>
-    <select id="relay-select"></select>
-    <button id="relay-connect-btn" class="pill relay-btn">连接 Relay</button>
-    <button id="relay-stop-btn" class="pill relay-btn">断开 Relay</button>
+    <button id="relay-connect-btn" class="pill relay-btn">连接心电带 (浏览器)</button>
+    <button id="relay-stop-btn" class="pill relay-btn" style="display:none">断开心电带</button>
     <span id="conn-pill" class="pill pill-waiting">等待中…</span>
   </div>
 </header>
@@ -592,6 +604,14 @@
     <button id="bolt-test-btn" style="width:100%;padding:0.75em;border:none;border-radius:10px;background:var(--accent);color:#fff;font-size:1.05rem;font-weight:600;cursor:pointer;margin-top:0.5rem">
       下一步：BOLT 测试 →
     </button>
+  </div>
+
+  <div class="summary-card" id="ble-diag-card">
+    <h3>蓝牙诊断</h3>
+    <div class="summary-row"><span class="sk">安全上下文</span><span class="sv" id="ble-diag-secure">––</span></div>
+    <div class="summary-row"><span class="sk">navigator.bluetooth</span><span class="sv" id="ble-diag-api">––</span></div>
+    <div class="summary-row"><span class="sk">页面协议</span><span class="sv" id="ble-diag-protocol">––</span></div>
+    <div class="summary-row"><span class="sk">最近失败</span><span class="sv" id="ble-diag-error">无</span></div>
   </div>
 </div>
 
@@ -713,6 +733,7 @@
   </div>
 </div>
 
+<footer id="footer-text">
   HeartBeat 呼吸训练 · 连接设备后开始
 </footer>
 
@@ -762,6 +783,7 @@
 </div>
 
 
+<script src="{{ url_for('static', filename='js/browser_ble_heart_relay.js') }}"></script>
 <script>
 // ══════════════════════════════════════════════════════════════════════════
 // SESSION ID  (read from ?id=xxx or ?session_id=xxx in URL)
@@ -789,9 +811,6 @@ const COLORS = {
 // ══════════════════════════════════════════════════════════════════════════
 const connPill       = document.getElementById('conn-pill');
 const bleBtn         = document.getElementById('ble-btn');
-const relayKeywordEl = document.getElementById('relay-keyword');
-const relaySearchBtn = document.getElementById('relay-search-btn');
-const relaySelectEl  = document.getElementById('relay-select');
 const relayConnectBtn= document.getElementById('relay-connect-btn');
 const relayStopBtn   = document.getElementById('relay-stop-btn');
 
@@ -826,6 +845,10 @@ const footerEl  = document.getElementById('footer-text');
 const saveBtn    = document.getElementById('save-btn');
 const restartBtn = document.getElementById('restart-btn');
 const saveStatus = document.getElementById('save-status');
+const bleDiagSecureEl   = document.getElementById('ble-diag-secure');
+const bleDiagApiEl      = document.getElementById('ble-diag-api');
+const bleDiagProtocolEl = document.getElementById('ble-diag-protocol');
+const bleDiagErrorEl    = document.getElementById('ble-diag-error');
 
 // ══════════════════════════════════════════════════════════════════════════
 // STATE
@@ -841,9 +864,20 @@ let sessionDuration  = 120;
 let sessionActive    = false;
 let timerInterval    = null;
 let onBreathCycleComplete = null;  // hook for Buteyko
+let heartBeltConnected = false;
 
 const bpmHistory  = [];
 const MAX_HISTORY = 60;
+
+const HEART_BELT_BLE_CONFIG = {
+  deviceNamePrefix: 'C5AB',
+  serviceUuid: '0000ffe0-0000-1000-8000-00805f9b34fb',
+  pulseUrl: api('/api/pulse'),
+};
+
+const heartBeltRelay = window.BrowserBleHeartRelay
+  ? new window.BrowserBleHeartRelay(HEART_BELT_BLE_CONFIG)
+  : null;
 
 // ══════════════════════════════════════════════════════════════════════════
 // HELPERS
@@ -853,6 +887,25 @@ function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 function easeInOut(t) { return t < 0.5 ? 2*t*t : -1 + (4 - 2*t)*t; }
 function phaseDuration() { return cycle[currentPhase] * 1000; }
 function nextPhase(p) { return p === 'inhale' ? 'exhale' : 'inhale'; }
+function normalizeBleError(error) {
+  if (!error) return '未知错误';
+  if (typeof error === 'string') return error;
+  if (error.message) return error.message;
+  return String(error);
+}
+function updateBleDiagnostics(lastError = null) {
+  const secure = !!window.isSecureContext;
+  const hasBluetoothApi = !!navigator.bluetooth;
+  bleDiagSecureEl.textContent = secure ? '是' : '否';
+  bleDiagSecureEl.style.color = secure ? 'var(--green)' : 'var(--red)';
+  bleDiagApiEl.textContent = hasBluetoothApi ? '可用' : '不可用';
+  bleDiagApiEl.style.color = hasBluetoothApi ? 'var(--green)' : 'var(--red)';
+  bleDiagProtocolEl.textContent = window.location.protocol || 'unknown';
+  bleDiagErrorEl.textContent = lastError ? normalizeBleError(lastError) : '无';
+}
+function setBleDiagnosticError(source, error) {
+  updateBleDiagnostics(`${source}: ${normalizeBleError(error)}`);
+}
 function formatTime(sec) {
   const m = Math.floor(sec / 60);
   const s = Math.floor(sec % 60);
@@ -1199,20 +1252,21 @@ restartBtn.addEventListener('click', restartSession);
 // ══════════════════════════════════════════════════════════════════════════
 let currentMode = 'resonance';
 
+function setMode(mode) {
+  currentMode = mode;
+  const isButeyko = mode === 'buteyko';
+  document.getElementById('tab-resonance').classList.toggle('active', !isButeyko);
+  document.getElementById('tab-buteyko').classList.toggle('active', isButeyko);
+  document.getElementById('resonance-card').style.display = isButeyko ? 'none' : '';
+  document.getElementById('buteyko-card').style.display = isButeyko ? '' : 'none';
+}
+
 document.getElementById('tab-resonance').addEventListener('click', () => {
-  currentMode = 'resonance';
-  document.getElementById('tab-resonance').classList.add('active');
-  document.getElementById('tab-buteyko').classList.remove('active');
-  document.getElementById('resonance-card').style.display = '';
-  document.getElementById('buteyko-card').style.display = 'none';
+  setMode('resonance');
 });
 
 document.getElementById('tab-buteyko').addEventListener('click', () => {
-  currentMode = 'buteyko';
-  document.getElementById('tab-buteyko').classList.add('active');
-  document.getElementById('tab-resonance').classList.remove('active');
-  document.getElementById('buteyko-card').style.display = '';
-  document.getElementById('resonance-card').style.display = 'none';
+  setMode('buteyko');
 });
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -1293,6 +1347,7 @@ function onBoltComplete(boltSec) {
 }
 
 document.getElementById('buteyko-back-btn').addEventListener('click', () => {
+  setMode('buteyko');
   showScreen('start-screen');
 });
 
@@ -1304,7 +1359,12 @@ document.getElementById('buteyko-begin-btn').addEventListener('click', async () 
   await fetch(api('/api/buteyko/configure'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ bolt_seconds: bBoltSeconds, target_hold: bConfig.target_hold, ...bConfig })
+    body: JSON.stringify({
+      username: cfgUsername.value.trim(),
+      bolt_seconds: bBoltSeconds,
+      target_hold: bConfig.target_hold,
+      ...bConfig,
+    })
   });
 
   startButeykoTraining();
@@ -1529,6 +1589,7 @@ document.getElementById('b-restart-btn').addEventListener('click', async () => {
   sessionActive = false;
   idleMode = true;
   showIdle();
+  setMode('buteyko');
   showScreen('start-screen');
   footerEl.textContent = 'HeartBeat 呼吸训练 · 连接设备后开始';
 });
@@ -1596,6 +1657,7 @@ function handleCharacteristicValueChanged(event) {
 bleBtn.addEventListener('click', async () => {
   try {
     if (!navigator.bluetooth) {
+      setBleDiagnosticError('ESP32 BLE', 'navigator.bluetooth 不可用');
       alert('Web Bluetooth 不支持此浏览器。请使用 Chrome（桌面或 Android），确保使用 HTTPS 或 localhost。');
       return;
     }
@@ -1612,7 +1674,9 @@ bleBtn.addEventListener('click', async () => {
     bleBtn.style.borderColor = 'var(--green)';
     bleBtn.style.color = 'var(--green)';
     bleBtn.disabled = true;
+    updateBleDiagnostics();
   } catch (error) {
+    setBleDiagnosticError('ESP32 BLE', error);
     alert('BLE 连接失败: ' + error);
   }
 });
@@ -1620,67 +1684,119 @@ bleBtn.addEventListener('click', async () => {
 // ══════════════════════════════════════════════════════════════════════════
 // RELAY
 // ══════════════════════════════════════════════════════════════════════════
-async function refreshRelayStatus() {
-  const resp = await fetch('/api/relay/status');  // relay is server-wide, no session_id needed
-  const data = await resp.json();
-  const running = !!data.running;
-  relayConnectBtn.disabled = running;
-  relayStopBtn.disabled    = !running;
-  relayConnectBtn.textContent = running
-    ? `Relay 运行中 (${data.device_name_keyword || ''})`
-    : '连接 Relay';
-}
-
-relaySearchBtn.addEventListener('click', async () => {
-  relaySearchBtn.textContent = '搜索中…';
-  relaySearchBtn.disabled = true;
-  try {
-    const keyword = relayKeywordEl.value.trim();
-    const resp = await fetch(`/api/relay/search?keyword=${encodeURIComponent(keyword)}`);  // relay is server-wide
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({ error: '搜索失败' }));
-      alert(err.error || '搜索失败');
-      return;
-    }
-    const data = await resp.json();
-    relaySelectEl.innerHTML = '';
-    (data.devices || []).forEach((d) => {
-      const opt = document.createElement('option');
-      opt.value = d.name;
-      opt.textContent = `${d.name} (${d.address})`;
-      relaySelectEl.appendChild(opt);
-    });
-  } finally {
-    relaySearchBtn.textContent = '搜索设备';
-    relaySearchBtn.disabled = false;
-  }
-});
-
-relayConnectBtn.addEventListener('click', async () => {
-  const picked = relaySelectEl.value || relayKeywordEl.value.trim();
-  const resp = await fetch('/api/relay/connect', {  // relay is server-wide
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ device_name_keyword: picked })
-  });
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ error: '连接失败' }));
-    alert(err.error || '连接失败');
+function updateHeartBeltButtons(state, detail = '') {
+  if (state === 'unsupported') {
+    relayConnectBtn.disabled = true;
+    relayConnectBtn.textContent = '浏览器不支持心电带 BLE';
+    relayStopBtn.style.display = 'none';
     return;
   }
-  await refreshRelayStatus();
+
+  if (state === 'connecting' || state === 'initializing') {
+    relayConnectBtn.disabled = true;
+    relayConnectBtn.textContent = state === 'connecting' ? '连接心电带中…' : '初始化心电带中…';
+    relayStopBtn.style.display = 'inline-block';
+    relayStopBtn.disabled = true;
+    return;
+  }
+
+  if (state === 'connected') {
+    relayConnectBtn.disabled = true;
+    relayConnectBtn.textContent = detail ? `心电带已连接 (${detail})` : '心电带已连接';
+    relayStopBtn.style.display = 'inline-block';
+    relayStopBtn.disabled = false;
+    return;
+  }
+
+  relayConnectBtn.disabled = false;
+  relayConnectBtn.textContent = '连接心电带 (浏览器)';
+  relayStopBtn.style.display = 'none';
+  relayStopBtn.disabled = true;
+}
+
+if (!heartBeltRelay || !heartBeltRelay.isSupported()) {
+  updateBleDiagnostics('心电带 BLE: 当前页面不是可用的安全上下文，或浏览器未暴露 Web Bluetooth');
+  updateHeartBeltButtons('unsupported');
+} else {
+  heartBeltRelay.setCallbacks({
+    onStatus: ({ state, deviceName }) => {
+      if (state === 'connecting' || state === 'requesting-device') {
+        updateHeartBeltButtons('connecting');
+      } else if (state === 'initializing') {
+        updateHeartBeltButtons('initializing');
+      } else if (state === 'connected') {
+        heartBeltConnected = true;
+        updateHeartBeltButtons('connected', deviceName || 'unknown');
+        footerEl.textContent = 'HeartBeat 呼吸训练 · 心电带已连接';
+        updateBleDiagnostics();
+      } else if (state === 'disconnected') {
+        heartBeltConnected = false;
+        updateHeartBeltButtons('idle');
+      }
+    },
+    onDeviceInfo: ({ power, version }) => {
+      const parts = [];
+      if (Number.isFinite(power) && power > 0) parts.push(`电量 ${power}%`);
+      if (version) parts.push(`版本 ${version}`);
+      if (parts.length > 0) {
+        footerEl.textContent = `HeartBeat 呼吸训练 · ${parts.join(' · ')}`;
+      }
+    },
+    onError: (error) => {
+      setBleDiagnosticError('心电带 BLE', error);
+      console.error('Heart belt BLE error:', error);
+    },
+  });
+
+  relayConnectBtn.addEventListener('click', async () => {
+    updateHeartBeltButtons('connecting');
+    try {
+      const info = await heartBeltRelay.connect();
+      heartBeltConnected = true;
+      updateHeartBeltButtons('connected', info.deviceName || 'unknown');
+    } catch (error) {
+      heartBeltConnected = false;
+      updateHeartBeltButtons('idle');
+      setBleDiagnosticError('心电带 BLE', error);
+      alert('心电带连接失败: ' + (error && error.message ? error.message : error));
+    }
+  });
+
+  relayStopBtn.addEventListener('click', async () => {
+    relayStopBtn.disabled = true;
+    try {
+      await heartBeltRelay.disconnect();
+    } catch (error) {
+      console.error('Heart belt disconnect failed:', error);
+    } finally {
+      heartBeltConnected = false;
+      updateHeartBeltButtons('idle');
+      footerEl.textContent = 'HeartBeat 呼吸训练 · 连接设备后开始';
+    }
+  });
+
+  window.addEventListener('beforeunload', () => {
+    if (heartBeltRelay.isConnected()) {
+      heartBeltRelay.disconnect().catch(() => {});
+    }
+  });
+  updateHeartBeltButtons('idle');
+}
+
+if (!heartBeltRelay || !heartBeltRelay.isSupported()) {
+  relayConnectBtn.addEventListener('click', () => {
+    updateBleDiagnostics('心电带 BLE: 浏览器不支持或当前连接未被认定为安全上下文');
+    alert('Web Bluetooth 不支持此浏览器。请使用 Chrome 或 Edge，并确保页面运行在 HTTPS 或 localhost。');
+  }
 });
 
-relayStopBtn.addEventListener('click', async () => {
-  await fetch('/api/relay/disconnect', { method: 'POST' });  // relay is server-wide
-  await refreshRelayStatus();
-});
+setMode(currentMode);
+updateBleDiagnostics();
 
 // ══════════════════════════════════════════════════════════════════════════
 // INIT
 // ══════════════════════════════════════════════════════════════════════════
 connectSSE();
-refreshRelayStatus();
 window.addEventListener('resize', () => { if (!idleMode) layoutTimeline(); });
 
 // Show session ID
