@@ -870,8 +870,7 @@ const bpmHistory  = [];
 const MAX_HISTORY = 60;
 
 const HEART_BELT_BLE_CONFIG = {
-  deviceNamePrefix: 'C5AB',
-  serviceUuid: '0000ffe0-0000-1000-8000-00805f9b34fb',
+  deviceNamePrefix: 'Farbeat',
   pulseUrl: api('/api/pulse'),
 };
 
@@ -1655,27 +1654,36 @@ function handleCharacteristicValueChanged(event) {
 }
 
 bleBtn.addEventListener('click', async () => {
+  console.log('[BLE-ESP32] Button clicked, checking navigator.bluetooth...');
   try {
     if (!navigator.bluetooth) {
+      console.warn('[BLE-ESP32] navigator.bluetooth not available');
       setBleDiagnosticError('ESP32 BLE', 'navigator.bluetooth 不可用');
       alert('Web Bluetooth 不支持此浏览器。请使用 Chrome（桌面或 Android），确保使用 HTTPS 或 localhost。');
       return;
     }
+    console.log('[BLE-ESP32] Requesting device with name:', DEVICE_NAME);
     const device = await navigator.bluetooth.requestDevice({
       filters: [{ name: DEVICE_NAME }],
       optionalServices: [SERVICE_UUID]
     });
+    console.log('[BLE-ESP32] Device selected:', device.name);
     const server = await device.gatt.connect();
+    console.log('[BLE-ESP32] GATT connected');
     const service = await server.getPrimaryService(SERVICE_UUID);
+    console.log('[BLE-ESP32] Service found');
     const characteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
+    console.log('[BLE-ESP32] Characteristic found');
     await characteristic.startNotifications();
     characteristic.addEventListener('characteristicvaluechanged', handleCharacteristicValueChanged);
     bleBtn.textContent = 'BLE 已连接';
     bleBtn.style.borderColor = 'var(--green)';
     bleBtn.style.color = 'var(--green)';
     bleBtn.disabled = true;
+    console.log('[BLE-ESP32] Connected successfully');
     updateBleDiagnostics();
   } catch (error) {
+    console.error('[BLE-ESP32] Connection failed:', error);
     setBleDiagnosticError('ESP32 BLE', error);
     alert('BLE 连接失败: ' + error);
   }
@@ -1787,8 +1795,8 @@ if (!heartBeltRelay || !heartBeltRelay.isSupported()) {
   relayConnectBtn.addEventListener('click', () => {
     updateBleDiagnostics('心电带 BLE: 浏览器不支持或当前连接未被认定为安全上下文');
     alert('Web Bluetooth 不支持此浏览器。请使用 Chrome 或 Edge，并确保页面运行在 HTTPS 或 localhost。');
-  }
-});
+  });
+}
 
 setMode(currentMode);
 updateBleDiagnostics();

@@ -1,11 +1,29 @@
 ﻿(function () {
   const DEFAULTS = {
-    deviceNamePrefix: 'C5AB',
-    serviceUuid: '0000ffe0-0000-1000-8000-00805f9b34fb',
+    deviceNamePrefix: 'Farbeat',
+    // Candidate service UUIDs to request access to – Web Bluetooth requires
+    // services to be declared upfront. We list common custom BLE service UUIDs
+    // so that dynamic discovery (matching the Python/WeChat ground truth) works.
+    candidateServiceUuids: [
+      '0000fff1-0000-1000-8000-00805f9b34fb',
+      '0000ffe0-0000-1000-8000-00805f9b34fb',
+      '0000ffe5-0000-1000-8000-00805f9b34fb',
+      '49535343-fe7d-4ae5-8fa9-9fafd205e455',
+      '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
+    ],
     replayDelayMs: 5000,
     minReplaySpacingMs: 250,
     pulseUrl: '/api/pulse',
   };
+
+  // Standard BLE service UUID prefixes to skip during discovery
+  // (matches the Python BluetoothManager.STANDARD_SERVICE_PREFIXES)
+  const STANDARD_SERVICE_PREFIXES = [
+    '00001800', // Generic Access
+    '00001801', // Generic Attribute
+    '0000180a', // Device Information
+    '0000180f', // Battery Service
+  ];
 
   const HRV_INT_FIELDS = {
     1: 'timeStamp',
@@ -338,8 +356,9 @@
         throw new Error('Web Bluetooth requires Chrome or Edge over HTTPS or localhost.');
       }
 
+      const candidateUuids = this.options.candidateServiceUuids || [];
       const requestOptions = {
-        optionalServices: [this.options.serviceUuid],
+        optionalServices: candidateUuids,
       };
       if (this.options.deviceNamePrefix) {
         requestOptions.filters = [{ namePrefix: this.options.deviceNamePrefix }];
@@ -354,20 +373,51 @@
       this.emitStatus('connecting', { deviceName: this.device.name || '' });
       this.server = await this.device.gatt.connect();
 
-      const service = await this.server.getPrimaryService(this.options.serviceUuid);
-      const characteristics = await service.getCharacteristics();
-      for (const characteristic of characteristics) {
-        const props = characteristic.properties || {};
-        if (!this.notifyCharacteristic && (props.notify || props.indicate)) {
-          this.notifyCharacteristic = characteristic;
+      // Dynamic service discovery – same logic as Python BluetoothManager.connect()
+      let services;
+      try {
+        services = await this.server.getPrimaryServices();
+      } catch (err) {
+        throw new Error('Failed to discover BLE services: ' + (err.message || err));
+      }
+
+      console.log(`[BLE-relay] Discovered ${services.length} service(s)`);
+      let foundServiceUuid = null;
+
+      for (const service of services) {
+        const uuid = service.uuid.toLowerCase();
+        const isStandard = STANDARD_SERVICE_PREFIXES.some((prefix) => uuid.startsWith(prefix));
+        if (isStandard) {
+          console.log(`[BLE-relay] Skipping standard service: ${uuid}`);
+          continue;
         }
-        if (!this.writeCharacteristic && (props.write || props.writeWithoutResponse)) {
-          this.writeCharacteristic = characteristic;
+        console.log(`[BLE-relay] Found custom service: ${uuid}`);
+
+        const characteristics = await service.getCharacteristics();
+        for (const characteristic of characteristics) {
+          const props = characteristic.properties || {};
+          console.log(`[BLE-relay]   Characteristic ${characteristic.uuid} – notify:${props.notify}, indicate:${props.indicate}, write:${props.write}, writeNoResp:${props.writeWithoutResponse}`);
+          if (!this.notifyCharacteristic && (props.notify || props.indicate)) {
+            this.notifyCharacteristic = characteristic;
+          }
+          if (!this.writeCharacteristic && (props.write || props.writeWithoutResponse)) {
+            this.writeCharacteristic = characteristic;
+          }
+        }
+
+        if (this.notifyCharacteristic || this.writeCharacteristic) {
+          foundServiceUuid = uuid;
+          break;
         }
       }
 
       if (!this.notifyCharacteristic || !this.writeCharacteristic) {
-        throw new Error('Required notify/write characteristics were not found on the BLE service.');
+        const discoveredUuids = services.map((s) => s.uuid).join(', ');
+        throw new Error(
+          'Required notify/write characteristics were not found. ' +
+          'Discovered services: [' + discoveredUuids + ']. ' +
+          'The device\'s custom service UUID may need to be added to candidateServiceUuids.'
+        );
       }
 
       await this.notifyCharacteristic.startNotifications();
@@ -379,7 +429,7 @@
 
       return {
         deviceName: this.device.name || '',
-        serviceUuid: this.options.serviceUuid,
+        serviceUuid: foundServiceUuid || '',
         notifyCharacteristicUuid: this.notifyCharacteristic.uuid,
         writeCharacteristicUuid: this.writeCharacteristic.uuid,
       };
