@@ -545,8 +545,10 @@
     <h2>共振呼吸设置</h2>
 
     <div class="form-group">
-      <label for="cfg-username">用户名（可选）</label>
-      <input type="text" id="cfg-username" placeholder="匿名" maxlength="64"/>
+      <label for="cfg-username">用户 ID</label>
+      <input type="text" id="cfg-username" readonly tabindex="-1"
+             style="opacity:0.7;cursor:default;border-color:transparent"/>
+      <div class="hint">由 URL 参数 ?user=xxx 指定，不可在此修改</div>
     </div>
 
     <div class="form-group">
@@ -786,10 +788,14 @@
 <script src="{{ url_for('static', filename='js/browser_ble_heart_relay.js') }}"></script>
 <script>
 // ══════════════════════════════════════════════════════════════════════════
-// SESSION ID  (read from ?id=xxx or ?session_id=xxx in URL)
+// USERNAME (from URL: ?user=张三)
+//   用户只需拿到一个固定 URL，每次打开即可使用。
+//   session_id 自动 = username，无需手动指定。
+//   多次训练分别以时间戳区分。
 // ══════════════════════════════════════════════════════════════════════════
 const _urlParams = new URLSearchParams(window.location.search);
-const SESSION_ID = _urlParams.get('id') || _urlParams.get('session_id') || 'default';
+const USERNAME   = (_urlParams.get('user') || _urlParams.get('username') || '').trim();
+const SESSION_ID = USERNAME || 'default';
 
 /** Append ?id=SESSION_ID to an API path */
 function api(path) {
@@ -819,6 +825,7 @@ const trainingScreen = document.getElementById('training-screen');
 const doneBanner     = document.getElementById('session-done');
 
 const cfgUsername    = document.getElementById('cfg-username');
+cfgUsername.value    = USERNAME || '（未设置）';
 const cfgCycle       = document.getElementById('cfg-cycle');
 const cfgDuration    = document.getElementById('cfg-duration');
 const cfgAdaptive    = document.getElementById('cfg-adaptive');
@@ -1133,8 +1140,6 @@ async function startSession() {
   const breathCycle = parseFloat(cfgCycle.value) || 10;
   const duration    = parseInt(cfgDuration.value) || 120;
   const adaptive    = cfgAdaptive.checked;
-  const username    = cfgUsername.value.trim();
-
   // Send config to server
   await fetch(api('/api/configure'), {
     method: 'POST',
@@ -1143,7 +1148,7 @@ async function startSession() {
       breath_cycle: breathCycle,
       session_duration: duration,
       adaptive: adaptive,
-      username: username,
+      username: USERNAME,
     })
   });
 
@@ -1206,7 +1211,7 @@ async function saveSessionData() {
     const resp = await fetch(api('/api/save_session'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: cfgUsername.value.trim() })
+      body: JSON.stringify({ username: USERNAME })
     });
     const result = await resp.json();
     if (result.ok) {
@@ -1359,7 +1364,7 @@ document.getElementById('buteyko-begin-btn').addEventListener('click', async () 
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      username: cfgUsername.value.trim(),
+      username: USERNAME,
       bolt_seconds: bBoltSeconds,
       target_hold: bConfig.target_hold,
       ...bConfig,
@@ -1557,7 +1562,7 @@ document.getElementById('b-save-btn').addEventListener('click', async () => {
     const resp = await fetch(api('/api/buteyko/save'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: document.getElementById('cfg-username').value.trim() })
+      body: JSON.stringify({ username: USERNAME })
     });
     const result = await resp.json();
     if (result.ok) {
@@ -1807,8 +1812,8 @@ updateBleDiagnostics();
 connectSSE();
 window.addEventListener('resize', () => { if (!idleMode) layoutTimeline(); });
 
-// Show session ID
-document.getElementById('session-id-label').textContent = `ID: ${SESSION_ID}`;
+// Show username in header
+document.getElementById('session-id-label').textContent = USERNAME || '未指定用户';
 </script>
 </body>
 </html>
