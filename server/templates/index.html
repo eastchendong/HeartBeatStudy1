@@ -524,6 +524,20 @@
     font-weight: 600;
     color: var(--accent);
   }
+
+  /* Ratio button styles */
+  .ratio-btn, .adp-ratio-btn, .adp-train-ratio-btn {
+    transition: all 0.2s;
+  }
+  .ratio-btn:hover, .adp-ratio-btn:hover, .adp-train-ratio-btn:hover {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+  .ratio-btn.active, .adp-ratio-btn.active, .adp-train-ratio-btn.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(88,166,255,0.1) !important;
+  }
   #buteyko-phase-label {
     display: none;
     font-size: 0.82rem;
@@ -586,19 +600,35 @@
 <div id="start-screen" class="screen active">
   <!-- Mode selector -->
   <div class="mode-tabs">
-    <button class="mode-tab active" id="tab-resonance">❤️ 共振呼吸</button>
-    <button class="mode-tab" id="tab-adaptive">🧪 自适应实验</button>
+    <button class="mode-tab active" id="tab-adaptive">🧪 个体共振频率 (PRBF)</button>
+    <button class="mode-tab" id="tab-resonance">❤️ 共振呼吸</button>
     <button class="mode-tab" id="tab-buteyko">🌬️ 布捷伊科屏气</button>
   </div>
 
   <!-- Resonance breathing setup card -->
-  <div class="setup-card" id="resonance-card">
+  <div class="setup-card" id="resonance-card" style="display:none">
     <h2>共振呼吸设置</h2>
 
     <div class="form-group">
       <label for="cfg-cycle">每次呼吸时长 (秒)</label>
       <input type="number" id="cfg-cycle" value="10" min="4" max="20"/>
-      <div class="hint">例如 9 = 吸气 4.5s + 呼气 4.5s；10 = 吸气 5s + 呼气 5s</div>
+      <div class="hint">例如 10 秒 = 吸气 + 呼气</div>
+    </div>
+
+    <div class="form-group">
+      <label>吸呼比例</label>
+      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.5rem">
+        <button type="button" class="ratio-btn" data-inhale="3" data-exhale="7" style="flex:1;padding:0.5em;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--muted);cursor:pointer;font-size:0.85rem">3:7</button>
+        <button type="button" class="ratio-btn active" data-inhale="4" data-exhale="6" style="flex:1;padding:0.5em;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--muted);cursor:pointer;font-size:0.85rem">4:6</button>
+        <button type="button" class="ratio-btn" data-inhale="5" data-exhale="5" style="flex:1;padding:0.5em;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--muted);cursor:pointer;font-size:0.85rem">5:5</button>
+        <button type="button" class="ratio-btn" data-inhale="custom" data-exhale="custom" style="flex:1;padding:0.5em;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--muted);cursor:pointer;font-size:0.85rem">自定义</button>
+      </div>
+      <div id="ratio-custom-inputs" style="display:none;gap:0.5rem">
+        <input type="number" id="cfg-inhale-ratio" value="4" min="1" max="9" style="width:60px;text-align:center"/>
+        <span style="color:var(--muted)">:</span>
+        <input type="number" id="cfg-exhale-ratio" value="6" min="1" max="9" style="width:60px;text-align:center"/>
+      </div>
+      <div class="hint" id="ratio-hint">吸气 : 呼气 = 4 : 6</div>
     </div>
 
     <div class="form-group">
@@ -607,51 +637,93 @@
       <div class="hint">默认 120 秒（2 分钟）。可设 30–3600 秒</div>
     </div>
 
-    <div class="toggle-row">
-      <label>实时 HRV 微调 (自动调节 ±0.5s)</label>
-      <div class="toggle-switch">
-        <input type="checkbox" id="cfg-adaptive" checked />
-        <span class="toggle-slider"></span>
-      </div>
-    </div>
-    <div class="form-group" style="margin-bottom:0.4rem">
-      <div class="hint" id="adaptive-hint">用于实时训练微调；PRBF 个体化筛选请使用“自适应实验”页面。</div>
-    </div>
 
     <button id="start-btn">开始训练</button>
   </div>
 
   <!-- Adaptive experiment setup card -->
-  <div class="setup-card" id="adaptive-card" style="display:none">
-    <h2>个体共振频率实验 (PRBF)</h2>
+  <div class="setup-card" id="adaptive-card">
+    <h2>个体共振频率 (PRBF) · 测试与训练</h2>
     <p class="exp-note">
-      实验流程：候选频率从低到高逐档测试，每档执行 3 个呼吸周期，记录 LF Power，最终选择 LF 最大对应频率作为 PRBF。
+      先进行<strong>测试</strong>确定您的最佳共振频率，然后用该频率进行<strong>训练</strong>。
     </p>
 
-    <div class="exp-grid">
-      <div class="form-group" style="margin-bottom:0.8rem">
-        <label for="adp-freq-start">起始频率 (bpm)</label>
-        <input type="number" id="adp-freq-start" value="8" min="6" max="15" step="0.25"/>
+    <!-- PRBF Test Section -->
+    <div style="border:1px solid var(--border);border-radius:12px;padding:1.2rem;margin-bottom:1rem">
+      <h3 style="font-size:1rem;color:var(--accent);margin-bottom:0.8rem">🔬 第一步：PRBF 测试</h3>
+      <p class="exp-note" style="margin-bottom:1rem">
+        10分钟测试：5个频率档位，每档2分钟。系统将自动分析 LF Power 确定您的最佳共振频率。
+      </p>
+      
+      <div class="exp-grid">
+        <div class="form-group" style="margin-bottom:0.8rem">
+          <label for="adp-freq-start">起始频率 (bpm)</label>
+          <input type="number" id="adp-freq-start" value="6" min="4" max="12" step="0.5"/>
+        </div>
+        <div class="form-group" style="margin-bottom:0.8rem">
+          <label for="adp-freq-end">结束频率 (bpm)</label>
+          <input type="number" id="adp-freq-end" value="8" min="4" max="12" step="0.5"/>
+        </div>
       </div>
+      
       <div class="form-group" style="margin-bottom:0.8rem">
-        <label for="adp-freq-end">结束频率 (bpm)</label>
-        <input type="number" id="adp-freq-end" value="10.25" min="6" max="15" step="0.25"/>
+        <label>测试档位 (自动计算)</label>
+        <div id="adp-test-slots" style="font-size:0.85rem;color:var(--muted);padding:0.5rem;background:var(--bg);border-radius:6px;border:1px solid var(--border)">
+          6.0 → 6.5 → 7.0 → 7.5 → 8.0 bpm（每档2分钟）
+        </div>
       </div>
+
+      <!-- PRBF Test Ratio -->
+      <div class="form-group" style="margin-bottom:0.8rem">
+        <label>测试吸呼比例</label>
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.5rem">
+          <button type="button" class="adp-ratio-btn" data-inhale="3" data-exhale="7" style="flex:1;padding:0.5em;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--muted);cursor:pointer;font-size:0.85rem">3:7</button>
+          <button type="button" class="adp-ratio-btn active" data-inhale="4" data-exhale="6" style="flex:1;padding:0.5em;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--muted);cursor:pointer;font-size:0.85rem">4:6</button>
+          <button type="button" class="adp-ratio-btn" data-inhale="5" data-exhale="5" style="flex:1;padding:0.5em;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--muted);cursor:pointer;font-size:0.85rem">5:5</button>
+        </div>
+        <div class="hint" id="adp-test-ratio-hint">吸气 : 呼气 = 4 : 6</div>
+      </div>
+      
+      <button id="adaptive-test-btn" style="width:100%;padding:0.75em;border:none;border-radius:10px;background:var(--accent);color:#fff;font-size:1rem;font-weight:600;cursor:pointer">开始 PRBF 测试（10分钟）</button>
     </div>
 
-    <div class="exp-grid">
-      <div class="form-group" style="margin-bottom:0.8rem">
-        <label for="adp-freq-step">频率步长 (bpm)</label>
-        <input type="number" id="adp-freq-step" value="0.25" min="0.1" max="2" step="0.05"/>
+    <!-- PRBF Train Section -->
+    <div style="border:1px solid var(--border);border-radius:12px;padding:1.2rem">
+      <h3 style="font-size:1rem;color:var(--green);margin-bottom:0.8rem">🧘 第二步：PRBF 训练</h3>
+      <p class="exp-note" style="margin-bottom:1rem">
+        使用测试确定的最佳频率进行10分钟共振呼吸训练。
+      </p>
+      
+      <div class="exp-grid">
+        <div class="form-group" style="margin-bottom:0.8rem">
+          <label for="adp-best-freq-input">最佳频率 (bpm)</label>
+          <input type="number" id="adp-best-freq-input" value="" min="4" max="12" step="0.1" placeholder="先完成测试或手动输入"/>
+        </div>
+        <div class="form-group" style="margin-bottom:0.8rem">
+          <label for="adp-train-duration">训练时长 (分钟)</label>
+          <input type="number" id="adp-train-duration" value="10" min="5" max="30" step="1"/>
+        </div>
       </div>
+
+      <!-- PRBF Train Ratio -->
       <div class="form-group" style="margin-bottom:0.8rem">
-        <label for="adp-cycles-per-rate">每档呼吸周期数</label>
-        <input type="number" id="adp-cycles-per-rate" value="3" min="1" max="10" step="1"/>
+        <label>训练吸呼比例</label>
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.5rem">
+          <button type="button" class="adp-train-ratio-btn" data-inhale="3" data-exhale="7" style="flex:1;padding:0.5em;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--muted);cursor:pointer;font-size:0.85rem">3:7</button>
+          <button type="button" class="adp-train-ratio-btn active" data-inhale="4" data-exhale="6" style="flex:1;padding:0.5em;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--muted);cursor:pointer;font-size:0.85rem">4:6</button>
+          <button type="button" class="adp-train-ratio-btn" data-inhale="5" data-exhale="5" style="flex:1;padding:0.5em;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--muted);cursor:pointer;font-size:0.85rem">5:5</button>
+        </div>
+        <div class="hint" id="adp-train-ratio-hint">吸气 : 呼气 = 4 : 6</div>
       </div>
+      
+      <div id="adp-best-freq-display" style="font-size:0.85rem;color:var(--muted);margin-bottom:0.8rem;display:none">
+        测试确定的最佳频率：<span style="color:var(--green);font-weight:600" id="adp-best-freq-value">--</span> bpm
+      </div>
+      
+      <button id="adaptive-train-btn" style="width:100%;padding:0.75em;border:none;border-radius:10px;background:var(--green);color:#fff;font-size:1rem;font-weight:600;cursor:pointer">开始 PRBF 训练</button>
     </div>
 
-    <button id="adaptive-start-btn">开始 PRBF 实验</button>
-    <div class="exp-progress" id="adaptive-progress-text"></div>
+    <div class="exp-progress" id="adaptive-progress-text" style="margin-top:1rem"></div>
   </div>
 
   <!-- Buteyko setup card -->
@@ -696,6 +768,15 @@
 
 <!-- ═══════════════════ TRAINING SCREEN ═══════════════════ -->
 <div id="training-screen" class="screen">
+  <!-- Header with back button -->
+  <div style="width:100%;max-width:480px;display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem">
+    <button id="training-back-btn" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:0.4em 1em;border-radius:8px;cursor:pointer;font-size:0.85rem;display:flex;align-items:center;gap:0.3rem">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      返回
+    </button>
+    <div style="font-size:0.82rem;color:var(--muted)">共振呼吸训练</div>
+  </div>
+
   <!-- Buteyko-only: round counter + phase badge -->
   <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;justify-content:center">
     <div id="round-counter"></div>
@@ -933,14 +1014,31 @@ const doneBanner     = document.getElementById('session-done');
 
 const cfgCycle       = document.getElementById('cfg-cycle');
 const cfgDuration    = document.getElementById('cfg-duration');
-const cfgAdaptive    = document.getElementById('cfg-adaptive');
+const cfgInhaleRatio = document.getElementById('cfg-inhale-ratio');
+const cfgExhaleRatio = document.getElementById('cfg-exhale-ratio');
+const ratioHint      = document.getElementById('ratio-hint');
 const startBtn       = document.getElementById('start-btn');
 const adpFreqStart   = document.getElementById('adp-freq-start');
 const adpFreqEnd     = document.getElementById('adp-freq-end');
-const adpFreqStep    = document.getElementById('adp-freq-step');
-const adpCyclesPerRate = document.getElementById('adp-cycles-per-rate');
-const adpStartBtn    = document.getElementById('adaptive-start-btn');
+const adpTestSlots   = document.getElementById('adp-test-slots');
+const adpTestBtn     = document.getElementById('adaptive-test-btn');
+const adpBestFreqInput = document.getElementById('adp-best-freq-input');
+const adpTrainDuration = document.getElementById('adp-train-duration');
+const adpTrainBtn    = document.getElementById('adaptive-train-btn');
+const adpBestFreqDisplay = document.getElementById('adp-best-freq-display');
+const adpBestFreqValue = document.getElementById('adp-best-freq-value');
 const adpProgressEl  = document.getElementById('adaptive-progress-text');
+
+// PRBF ratio elements
+const adpTestRatioHint = document.getElementById('adp-test-ratio-hint');
+const adpTrainRatioHint = document.getElementById('adp-train-ratio-hint');
+
+// PRBF state
+let prbfBestFreq = null;
+let adpTestInhaleRatio = 4;
+let adpTestExhaleRatio = 6;
+let adpTrainInhaleRatio = 4;
+let adpTrainExhaleRatio = 6;
 
 const bpmEl     = document.getElementById('bpm-value');
 const hrvEl     = document.getElementById('hrv-value');
@@ -1258,7 +1356,10 @@ async function startSession() {
   // Read config from form
   const breathCycle = parseFloat(cfgCycle.value) || 10;
   const duration    = parseInt(cfgDuration.value) || 120;
-  const adaptive    = cfgAdaptive.checked;
+  const inhaleRatio = parseInt(cfgInhaleRatio.value) || 4;
+  const exhaleRatio = parseInt(cfgExhaleRatio.value) || 6;
+  const totalRatio  = inhaleRatio + exhaleRatio;
+  
   // Send config to server
   await fetch(api('/api/configure'), {
     method: 'POST',
@@ -1266,8 +1367,10 @@ async function startSession() {
     body: JSON.stringify({
       breath_cycle: breathCycle,
       session_duration: duration,
-      adaptive: adaptive,
+      adaptive: false,
       username: USERNAME,
+      inhale_ratio: inhaleRatio,
+      exhale_ratio: exhaleRatio,
     })
   });
 
@@ -1281,16 +1384,17 @@ async function startSession() {
   sessionActive    = true;
   bpmHistory.length = 0;
 
-  // Set initial cycle from config
-  const half = breathCycle / 2;
-  cycle = { inhale: half, exhale: half, total: breathCycle };
+  // Set initial cycle from config using ratio
+  const inhale = breathCycle * inhaleRatio / totalRatio;
+  const exhale = breathCycle * exhaleRatio / totalRatio;
+  cycle = { inhale, exhale, total: breathCycle };
 
   // Switch UI
   showScreen('training-screen');
   roundCounterEl.style.display = 'none';
   bPhaseLabelEl.style.display = 'none';
   timerEl.textContent = formatTime(duration);
-  footerEl.textContent = `呼吸训练 · ${duration}s · 周期 ${breathCycle}s`;
+  footerEl.textContent = `呼吸训练 · ${duration}s · 周期 ${breathCycle}s · 比例 ${inhaleRatio}:${exhaleRatio}`;
   doneBanner.classList.remove('visible');
 
   // Start breathing animation immediately (uses configured cycle, no data dependency)
@@ -1372,10 +1476,32 @@ startBtn.addEventListener('click', startSession);
 saveBtn.addEventListener('click', saveSessionData);
 restartBtn.addEventListener('click', restartSession);
 
+// Training screen back button
+const trainingBackBtn = document.getElementById('training-back-btn');
+trainingBackBtn.addEventListener('click', async () => {
+  if (!confirm('确定要返回主界面吗？当前训练进度将丢失。')) return;
+  // Stop session
+  sessionActive = false;
+  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+  if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
+  await fetch(api('/api/stop'), { method: 'POST' });
+  await fetch(api('/api/reset'), { method: 'POST' });
+  // Reset UI
+  doneBanner.classList.remove('visible');
+  adaptiveDoneEl.classList.remove('visible');
+  buteykoDonel.classList.remove('visible');
+  roundCounterEl.style.display = 'none';
+  bPhaseLabelEl.style.display = 'none';
+  document.getElementById('timer-value').closest('.stat').style.display = '';
+  showIdle();
+  showScreen('start-screen');
+  footerEl.textContent = 'HeartBeat 呼吸训练 · 连接设备后开始';
+});
+
 // ══════════════════════════════════════════════════════════════════════════
 // MODE TABS
 // ══════════════════════════════════════════════════════════════════════════
-let currentMode = 'resonance';
+let currentMode = 'adaptive';
 
 function setMode(mode) {
   currentMode = mode;
@@ -1406,17 +1532,29 @@ function bpmToCycle(freq) {
   return Math.round((60 / freq) * 100) / 100;
 }
 
-function buildFrequencyList(start, end, step) {
+// ── PRBF Helper Functions ─────────────────────────────────────────────────
+function buildFrequencyList(start, end, count) {
+  // Build exactly `count` frequencies evenly spaced from start to end
   const list = [];
-  if (!(start > 0 && end > 0 && step > 0) || end < start) return list;
-  const limit = 200;
-  let f = start;
-  while (f <= end + 1e-9 && list.length < limit) {
+  if (!(start > 0 && end > 0) || end < start || count < 1) return list;
+  if (count === 1) return [Math.round(start * 100) / 100];
+  for (let i = 0; i < count; i++) {
+    const f = start + (end - start) * i / (count - 1);
     list.push(Math.round(f * 100) / 100);
-    f += step;
   }
   return list;
 }
+
+function updateTestSlots() {
+  const start = parseFloat(adpFreqStart.value) || 6;
+  const end = parseFloat(adpFreqEnd.value) || 8;
+  const slots = buildFrequencyList(start, end, 5);
+  adpTestSlots.textContent = slots.map(f => f.toFixed(1)).join(' → ') + ' bpm（每档2分钟）';
+}
+
+adpFreqStart.addEventListener('input', updateTestSlots);
+adpFreqEnd.addEventListener('input', updateTestSlots);
+updateTestSlots();
 
 function updateAdaptiveProgress() {
   if (!adaptiveExperiment || !adaptiveExperiment.running) {
@@ -1426,50 +1564,63 @@ function updateAdaptiveProgress() {
   const idx = adaptiveExperiment.index;
   const total = adaptiveExperiment.frequencies.length;
   const freq = adaptiveExperiment.frequencies[idx];
-  const finishedCycles = adaptiveExperiment.cyclesPerRate - adaptiveExperiment.cyclesLeft;
-  adpProgressEl.textContent = `第 ${idx + 1}/${total} 档 · ${freq.toFixed(2)} bpm · 已完成 ${finishedCycles}/${adaptiveExperiment.cyclesPerRate} 周期`;
-  bPhaseLabelEl.textContent = `PRBF 实验 ${idx + 1}/${total} · ${freq.toFixed(2)} bpm`;
+  const elapsedMin = (Date.now() - adaptiveExperiment.startTime) / 60000;
+  if (adaptiveExperiment.mode === 'test') {
+    adpProgressEl.textContent = `测试第 ${idx + 1}/${total} 档 · ${freq.toFixed(2)} bpm · 已进行 ${elapsedMin.toFixed(1)} 分钟`;
+    bPhaseLabelEl.textContent = `PRBF 测试 ${idx + 1}/${total}`;
+  } else {
+    adpProgressEl.textContent = `训练中 · ${freq.toFixed(2)} bpm · 剩余 ${formatTime(sessionRemaining)}`;
+    bPhaseLabelEl.textContent = `PRBF 训练`;
+  }
 }
 
-async function startAdaptiveExperiment() {
+// ── PRBF TEST MODE ─────────────────────────────────────────────────────────
+async function startAdaptiveTest() {
   const startFreq = parseFloat(adpFreqStart.value);
   const endFreq = parseFloat(adpFreqEnd.value);
-  const stepFreq = parseFloat(adpFreqStep.value);
-  const cyclesPerRate = parseInt(adpCyclesPerRate.value, 10);
-  const frequencies = buildFrequencyList(startFreq, endFreq, stepFreq);
+  
+  // Fixed: 5 slots, 2 minutes each = 10 minutes total
+  const frequencies = buildFrequencyList(startFreq, endFreq, 5);
+  const slotDuration = 120; // 2 minutes per slot in seconds
+  const totalDuration = slotDuration * 5; // 10 minutes total
 
-  if (frequencies.length === 0 || !Number.isFinite(cyclesPerRate) || cyclesPerRate < 1) {
-    alert('请检查实验参数：频率范围、步长、周期数必须有效。');
+  if (frequencies.length !== 5) {
+    alert('请检查频率范围参数');
     return;
   }
 
   adaptiveExperiment = {
+    mode: 'test',
     frequencies,
-    cyclesPerRate,
+    slotDuration,
     index: 0,
-    cyclesLeft: cyclesPerRate,
     results: [],
     running: true,
+    startTime: Date.now(),
+    slotStartTime: Date.now(),
   };
 
   const firstCycle = bpmToCycle(frequencies[0]);
-  const totalSeconds = Math.ceil(frequencies.reduce((sum, f) => sum + cyclesPerRate * (60 / f), 0) + 15);
-  const boundedDuration = Math.min(3600, Math.max(60, totalSeconds));
+  const totalRatio = adpTestInhaleRatio + adpTestExhaleRatio;
+  const firstInhale = firstCycle * adpTestInhaleRatio / totalRatio;
+  const firstExhale = firstCycle * adpTestExhaleRatio / totalRatio;
 
   await fetch(api('/api/configure'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       breath_cycle: firstCycle,
-      session_duration: boundedDuration,
+      session_duration: totalDuration,
       adaptive: false,
       username: USERNAME,
+      inhale_ratio: adpTestInhaleRatio,
+      exhale_ratio: adpTestExhaleRatio,
     })
   });
   await fetch(api('/api/start'), { method: 'POST' });
 
-  sessionDuration = boundedDuration;
-  sessionRemaining = boundedDuration;
+  sessionDuration = totalDuration;
+  sessionRemaining = totalDuration;
   lastTimerSync = Date.now();
   sessionActive = true;
   bpmHistory.length = 0;
@@ -1481,71 +1632,109 @@ async function startAdaptiveExperiment() {
   roundCounterEl.style.display = 'none';
   bPhaseLabelEl.style.display = '';
 
-  cycle = { inhale: firstCycle / 2, exhale: firstCycle / 2, total: firstCycle };
+  cycle = { inhale: firstInhale, exhale: firstExhale, total: firstCycle };
   cycleEl.textContent = firstCycle.toFixed(2);
 
-  onBreathCycleComplete = onAdaptiveCycleComplete;
+  onBreathCycleComplete = null; // Not using cycle-based progression
   showScreen('training-screen');
-  timerEl.textContent = formatTime(boundedDuration);
-  footerEl.textContent = 'PRBF 实验进行中 · 按候选频率逐档测试';
+  timerEl.textContent = formatTime(totalDuration);
+  footerEl.textContent = 'PRBF 测试中 · 10分钟确定最佳频率';
   updateAdaptiveProgress();
   layoutTimeline();
   startBreathing();
   startTimerTick();
+  
+  // Start slot timer
+  startAdaptiveSlotTimer();
 }
 
-function onAdaptiveCycleComplete() {
-  if (!adaptiveExperiment || !adaptiveExperiment.running) return;
-
-  adaptiveExperiment.cyclesLeft -= 1;
-  if (adaptiveExperiment.cyclesLeft > 0) {
+function startAdaptiveSlotTimer() {
+  // Check every second if we need to move to next slot
+  const slotInterval = setInterval(() => {
+    if (!adaptiveExperiment || !adaptiveExperiment.running || adaptiveExperiment.mode !== 'test') {
+      clearInterval(slotInterval);
+      return;
+    }
+    
+    const elapsed = (Date.now() - adaptiveExperiment.slotStartTime) / 1000;
+    
+    // Record data at end of each slot
+    if (elapsed >= adaptiveExperiment.slotDuration - 1 && elapsed < adaptiveExperiment.slotDuration + 1) {
+      const freq = adaptiveExperiment.frequencies[adaptiveExperiment.index];
+      adaptiveExperiment.results.push({
+        freq,
+        cycle: bpmToCycle(freq),
+        lf: latestLiveMetrics.lf,
+        rmssd: latestLiveMetrics.rmssd,
+        bpm: latestLiveMetrics.bpm,
+      });
+    }
+    
+    // Move to next slot
+    if (elapsed >= adaptiveExperiment.slotDuration) {
+      if (adaptiveExperiment.index >= adaptiveExperiment.frequencies.length - 1) {
+        // Test complete
+        clearInterval(slotInterval);
+        adaptiveExperiment.running = false;
+        void finishAdaptiveTest();
+        return;
+      }
+      
+      // Advance to next frequency
+      adaptiveExperiment.index += 1;
+      adaptiveExperiment.slotStartTime = Date.now();
+      const nextFreq = adaptiveExperiment.frequencies[adaptiveExperiment.index];
+      const nextCycle = bpmToCycle(nextFreq);
+      const nextTotalRatio = adpTestInhaleRatio + adpTestExhaleRatio;
+      const nextInhale = nextCycle * adpTestInhaleRatio / nextTotalRatio;
+      const nextExhale = nextCycle * adpTestExhaleRatio / nextTotalRatio;
+      cycle = { inhale: nextInhale, exhale: nextExhale, total: nextCycle };
+      cycleEl.textContent = nextCycle.toFixed(2);
+      layoutTimeline();
+      
+      fetch(api('/api/configure'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          breath_cycle: nextCycle, 
+          adaptive: false,
+          inhale_ratio: adpTestInhaleRatio,
+          exhale_ratio: adpTestExhaleRatio,
+        })
+      }).catch(() => {});
+    }
+    
     updateAdaptiveProgress();
-    return;
-  }
-
-  const freq = adaptiveExperiment.frequencies[adaptiveExperiment.index];
-  const cycleSec = bpmToCycle(freq);
-  adaptiveExperiment.results.push({
-    freq,
-    cycle: cycleSec,
-    lf: latestLiveMetrics.lf,
-    rmssd: latestLiveMetrics.rmssd,
-    bpm: latestLiveMetrics.bpm,
-  });
-
-  if (adaptiveExperiment.index >= adaptiveExperiment.frequencies.length - 1) {
-    adaptiveExperiment.running = false;
-    onBreathCycleComplete = null;
-    void finishAdaptiveExperiment();
-    return;
-  }
-
-  adaptiveExperiment.index += 1;
-  adaptiveExperiment.cyclesLeft = adaptiveExperiment.cyclesPerRate;
-  const nextFreq = adaptiveExperiment.frequencies[adaptiveExperiment.index];
-  const nextCycle = bpmToCycle(nextFreq);
-  cycle = { inhale: nextCycle / 2, exhale: nextCycle / 2, total: nextCycle };
-  cycleEl.textContent = nextCycle.toFixed(2);
-  layoutTimeline();
-
-  fetch(api('/api/configure'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ breath_cycle: nextCycle, adaptive: false })
-  }).catch(() => {});
-
-  updateAdaptiveProgress();
+  }, 1000);
 }
 
-async function finishAdaptiveExperiment() {
+async function finishAdaptiveTest() {
   sessionActive = false;
   if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
   bPhaseLabelEl.style.display = 'none';
   await fetch(api('/api/stop'), { method: 'POST' });
-  showAdaptiveResultOverlay();
+  
+  // Find best frequency
+  const rows = adaptiveExperiment.results;
+  let best = null;
+  for (const row of rows) {
+    if (!Number.isFinite(row.lf)) continue;
+    if (!best || row.lf > best.lf) best = row;
+  }
+  if (!best && rows.length > 0) best = rows[0];
+  
+  if (best) {
+    prbfBestFreq = best.freq;
+    adpBestFreqInput.value = best.freq.toFixed(2);
+    adpBestFreqValue.textContent = best.freq.toFixed(2);
+    adpBestFreqDisplay.style.display = 'block';
+    adpTrainBtn.textContent = `开始 PRBF 训练（${best.freq.toFixed(2)} bpm）`;
+  }
+  
+  showAdaptiveTestResultOverlay();
 }
 
-function showAdaptiveResultOverlay() {
+function showAdaptiveTestResultOverlay() {
   const tbody = document.getElementById('adp-results-body');
   const rows = (adaptiveExperiment && adaptiveExperiment.results) ? adaptiveExperiment.results : [];
   tbody.innerHTML = '';
@@ -1577,8 +1766,86 @@ function showAdaptiveResultOverlay() {
   adaptiveDoneEl.classList.add('visible');
 }
 
-adpStartBtn.addEventListener('click', () => {
-  void startAdaptiveExperiment();
+// ── PRBF TRAIN MODE ────────────────────────────────────────────────────────
+async function startAdaptiveTrain() {
+  const freq = parseFloat(adpBestFreqInput.value);
+  const durationMin = parseInt(adpTrainDuration.value, 10);
+  const durationSec = durationMin * 60;
+  
+  if (!Number.isFinite(freq) || freq < 4 || freq > 12) {
+    alert('请输入有效频率 (4-12 bpm)');
+    return;
+  }
+  
+  // Check if user has completed test
+  const hasTestResult = prbfBestFreq !== null && Math.abs(prbfBestFreq - freq) < 0.01;
+  if (!hasTestResult) {
+    if (!confirm('您尚未完成 PRBF 测试，确定要使用当前频率进行训练吗？\n\n建议先进行测试以确定最佳共振频率。')) {
+      return;
+    }
+  }
+  
+  const cycleSec = bpmToCycle(freq);
+  const totalRatio = adpTrainInhaleRatio + adpTrainExhaleRatio;
+  const inhaleSec = cycleSec * adpTrainInhaleRatio / totalRatio;
+  const exhaleSec = cycleSec * adpTrainExhaleRatio / totalRatio;
+  
+  adaptiveExperiment = {
+    mode: 'train',
+    frequencies: [freq],
+    index: 0,
+    results: [],
+    running: true,
+    startTime: Date.now(),
+  };
+
+  await fetch(api('/api/configure'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      breath_cycle: cycleSec,
+      session_duration: durationSec,
+      adaptive: false,
+      username: USERNAME,
+      inhale_ratio: adpTrainInhaleRatio,
+      exhale_ratio: adpTrainExhaleRatio,
+    })
+  });
+  await fetch(api('/api/start'), { method: 'POST' });
+
+  sessionDuration = durationSec;
+  sessionRemaining = durationSec;
+  lastTimerSync = Date.now();
+  sessionActive = true;
+  bpmHistory.length = 0;
+  doneBanner.classList.remove('visible');
+  buteykoDonel.classList.remove('visible');
+  adaptiveDoneEl.classList.remove('visible');
+
+  document.getElementById('timer-value').closest('.stat').style.display = '';
+  roundCounterEl.style.display = 'none';
+  bPhaseLabelEl.style.display = '';
+
+  cycle = { inhale: inhaleSec, exhale: exhaleSec, total: cycleSec };
+  cycleEl.textContent = cycleSec.toFixed(2);
+
+  onBreathCycleComplete = null;
+  showScreen('training-screen');
+  timerEl.textContent = formatTime(durationSec);
+  footerEl.textContent = `PRBF 训练中 · ${freq.toFixed(2)} bpm · ${durationMin}分钟 · 比例 ${adpTrainInhaleRatio}:${adpTrainExhaleRatio}`;
+  updateAdaptiveProgress();
+  layoutTimeline();
+  startBreathing();
+  startTimerTick();
+}
+
+// ── Event Listeners ───────────────────────────────────────────────────────
+adpTestBtn.addEventListener('click', () => {
+  void startAdaptiveTest();
+});
+
+adpTrainBtn.addEventListener('click', () => {
+  void startAdaptiveTrain();
 });
 
 document.getElementById('adp-apply-btn').addEventListener('click', () => {
@@ -1589,14 +1856,22 @@ document.getElementById('adp-apply-btn').addEventListener('click', () => {
     if (!best || row.lf > best.lf) best = row;
   }
   if (!best && rows.length > 0) best = rows[0];
-  if (best) cfgCycle.value = best.cycle.toFixed(2);
+  if (best) {
+    cfgCycle.value = best.cycle.toFixed(2);
+    // Also update the PRBF train frequency
+    prbfBestFreq = best.freq;
+    adpBestFreqInput.value = best.freq.toFixed(2);
+    adpBestFreqValue.textContent = best.freq.toFixed(2);
+    adpBestFreqDisplay.style.display = 'block';
+    adpTrainBtn.textContent = `开始 PRBF 训练（${best.freq.toFixed(2)} bpm）`;
+  }
 
   adaptiveDoneEl.classList.remove('visible');
-  setMode('resonance');
+  setMode('adaptive');
   bPhaseLabelEl.style.display = 'none';
   showIdle();
   showScreen('start-screen');
-  footerEl.textContent = '已应用 PRBF 结果到共振呼吸设置';
+  footerEl.textContent = '已应用 PRBF 测试结果';
 });
 
 document.getElementById('adp-restart-btn').addEventListener('click', async () => {
@@ -2143,6 +2418,95 @@ if (!heartBeltRelay || !heartBeltRelay.isSupported()) {
 
 setMode(currentMode);
 updateBleDiagnostics();
+
+// ══════════════════════════════════════════════════════════════════════════
+// BREATH RATIO SELECTOR
+// ══════════════════════════════════════════════════════════════════════════
+const ratioBtns = document.querySelectorAll('.ratio-btn');
+const ratioCustomInputs = document.getElementById('ratio-custom-inputs');
+
+function updateRatioHint() {
+  const inhale = parseInt(cfgInhaleRatio.value) || 4;
+  const exhale = parseInt(cfgExhaleRatio.value) || 6;
+  const cycle = parseFloat(cfgCycle.value) || 10;
+  const inhaleSec = (cycle * inhale / (inhale + exhale)).toFixed(1);
+  const exhaleSec = (cycle * exhale / (inhale + exhale)).toFixed(1);
+  ratioHint.textContent = `吸气 : 呼气 = ${inhale} : ${exhale} （${inhaleSec}s : ${exhaleSec}s）`;
+}
+
+ratioBtns.forEach(btn => {
+  btn.addEventListener('click', () => {
+    ratioBtns.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    
+    const inhale = btn.dataset.inhale;
+    const exhale = btn.dataset.exhale;
+    
+    if (inhale === 'custom') {
+      ratioCustomInputs.style.display = 'flex';
+    } else {
+      ratioCustomInputs.style.display = 'none';
+      cfgInhaleRatio.value = inhale;
+      cfgExhaleRatio.value = exhale;
+    }
+    updateRatioHint();
+  });
+});
+
+[cfgInhaleRatio, cfgExhaleRatio, cfgCycle].forEach(el => {
+  el.addEventListener('input', updateRatioHint);
+});
+
+// Initialize hint
+updateRatioHint();
+
+// ══════════════════════════════════════════════════════════════════════════
+// PRBF RATIO BUTTONS
+// ══════════════════════════════════════════════════════════════════════════
+const adpTestRatioBtns = document.querySelectorAll('.adp-ratio-btn');
+const adpTrainRatioBtns = document.querySelectorAll('.adp-train-ratio-btn');
+
+function updateAdpTestRatioHint() {
+  const cycle = bpmToCycle(parseFloat(adpFreqStart.value) || 6);
+  const inhaleSec = (cycle * adpTestInhaleRatio / (adpTestInhaleRatio + adpTestExhaleRatio)).toFixed(1);
+  const exhaleSec = (cycle * adpTestExhaleRatio / (adpTestInhaleRatio + adpTestExhaleRatio)).toFixed(1);
+  adpTestRatioHint.textContent = `吸气 : 呼气 = ${adpTestInhaleRatio} : ${adpTestExhaleRatio} （${inhaleSec}s : ${exhaleSec}s）`;
+}
+
+function updateAdpTrainRatioHint() {
+  const freq = parseFloat(adpBestFreqInput.value) || 6;
+  const cycle = bpmToCycle(freq);
+  const inhaleSec = (cycle * adpTrainInhaleRatio / (adpTrainInhaleRatio + adpTrainExhaleRatio)).toFixed(1);
+  const exhaleSec = (cycle * adpTrainExhaleRatio / (adpTrainInhaleRatio + adpTrainExhaleRatio)).toFixed(1);
+  adpTrainRatioHint.textContent = `吸气 : 呼气 = ${adpTrainInhaleRatio} : ${adpTrainExhaleRatio} （${inhaleSec}s : ${exhaleSec}s）`;
+}
+
+adpTestRatioBtns.forEach(btn => {
+  btn.addEventListener('click', () => {
+    adpTestRatioBtns.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    adpTestInhaleRatio = parseInt(btn.dataset.inhale) || 4;
+    adpTestExhaleRatio = parseInt(btn.dataset.exhale) || 6;
+    updateAdpTestRatioHint();
+  });
+});
+
+adpTrainRatioBtns.forEach(btn => {
+  btn.addEventListener('click', () => {
+    adpTrainRatioBtns.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    adpTrainInhaleRatio = parseInt(btn.dataset.inhale) || 4;
+    adpTrainExhaleRatio = parseInt(btn.dataset.exhale) || 6;
+    updateAdpTrainRatioHint();
+  });
+});
+
+adpFreqStart.addEventListener('input', updateAdpTestRatioHint);
+adpBestFreqInput.addEventListener('input', updateAdpTrainRatioHint);
+
+// Initialize hints
+updateAdpTestRatioHint();
+updateAdpTrainRatioHint();
 
 // ══════════════════════════════════════════════════════════════════════════
 // INIT

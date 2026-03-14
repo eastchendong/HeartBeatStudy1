@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Admin Dashboard · HeartBeat</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  
+  :root {
+    --bg:        #0d1117;
+    --surface:   #161b22;
+    --border:    #30363d;
+    --text:      #e6edf3;
+    --muted:     #8b949e;
+    --accent:    #58a6ff;
+    --green:     #3fb950;
+    --yellow:    #d29922;
+    --red:       #f85149;
+  }
+  
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    min-height: 100vh;
+    display: grid;
+    grid-template-rows: auto 1fr;
+  }
+  
+  /* Header */
+  header {
+    padding: 1rem 2rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 1rem;
+  }
+  
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  
+  header h1 {
+    font-size: 1.2rem;
+    font-weight: 600;
+  }
+  
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+  
+  .logout-btn {
+    padding: 0.4em 1em;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 0.85rem;
+  }
+  
+  .logout-btn:hover {
+    border-color: var(--red);
+    color: var(--red);
+  }
+  
+  /* Main content */
+  main {
+    padding: 2rem;
+    max-width: 1400px;
+    width: 100%;
+    margin: 0 auto;
+  }
+  
+  /* Stats cards */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+  }
+  
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.2rem;
+  }
+  
+  .stat-card .label {
+    font-size: 0.75rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 0.4rem;
+  }
+  
+  .stat-card .value {
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: var(--accent);
+  }
+  
+  /* Filter section */
+  .filter-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+  
+  .filter-row {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    align-items: flex-end;
+  }
+  
+  .filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  
+  .filter-group label {
+    font-size: 0.75rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  
+  .filter-group input,
+  .filter-group select {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.5em 0.8em;
+    color: var(--text);
+    font-size: 0.9rem;
+    outline: none;
+  }
+  
+  .filter-group input:focus,
+  .filter-group select:focus {
+    border-color: var(--accent);
+  }
+  
+  .filter-btn {
+    padding: 0.55em 1.2em;
+    border: none;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: opacity 0.2s;
+  }
+  
+  .filter-btn:hover {
+    opacity: 0.88;
+  }
+  
+  .filter-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  
+  .reset-btn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  
+  .reset-btn:hover {
+    border-color: var(--text);
+    color: var(--text);
+    opacity: 1;
+  }
+  
+  /* Actions bar */
+  .actions-bar {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+  }
+  
+  .actions-bar .info {
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+  
+  .action-btn {
+    padding: 0.5em 1em;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 0.85rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  
+  .action-btn:hover:not(:disabled) {
+    border-color: var(--accent);
+  }
+  
+  .action-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  
+  .action-btn.primary {
+    background: var(--green);
+    border-color: var(--green);
+    color: #fff;
+  }
+  
+  .action-btn.primary:hover:not(:disabled) {
+    opacity: 0.88;
+  }
+  
+  /* Table */
+  .table-container {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    overflow-x: auto;
+  }
+  
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+  }
+  
+  thead {
+    background: rgba(48, 54, 61, 0.5);
+  }
+  
+  th {
+    padding: 0.8em 1em;
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+  }
+  
+  th:hover {
+    color: var(--text);
+  }
+  
+  th.sortable::after {
+    content: ' ↕';
+    opacity: 0.3;
+  }
+  
+  th.sort-asc::after {
+    content: ' ↑';
+    opacity: 1;
+    color: var(--accent);
+  }
+  
+  th.sort-desc::after {
+    content: ' ↓';
+    opacity: 1;
+    color: var(--accent);
+  }
+  
+  td {
+    padding: 0.8em 1em;
+    border-bottom: 1px solid var(--border);
+  }
+  
+  tbody tr:hover {
+    background: rgba(88, 166, 255, 0.05);
+  }
+  
+  tbody tr:last-child td {
+    border-bottom: none;
+  }
+  
+  .checkbox-col {
+    width: 40px;
+    text-align: center;
+  }
+  
+  .checkbox-col input[type="checkbox"] {
+    cursor: pointer;
+  }
+  
+  .cell-username {
+    font-weight: 500;
+  }
+  
+  .cell-type {
+    display: inline-block;
+    padding: 0.2em 0.6em;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+  }
+  
+  .type-buteyko { color: var(--yellow); border-color: var(--yellow); }
+  .type-prbf { color: var(--accent); border-color: var(--accent); }
+  .type-resonance { color: var(--green); border-color: var(--green); }
+  .type-fast_resonance { color: #a371f7; border-color: #a371f7; }
+  .type-slow_resonance { color: #3fb950; border-color: #3fb950; }
+  
+  .cell-number {
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+  
+  .cell-actions {
+    display: flex;
+    gap: 0.5rem;
+  }
+  
+  .icon-btn {
+    padding: 0.3em 0.6em;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+  
+  .icon-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  
+  /* Empty state */
+  .empty-state {
+    text-align: center;
+    padding: 4rem 2rem;
+    color: var(--muted);
+  }
+  
+  .empty-state svg {
+    margin-bottom: 1rem;
+    opacity: 0.5;
+  }
+  
+  /* Loading */
+  .loading {
+    text-align: center;
+    padding: 3rem;
+    color: var(--muted);
+  }
+  
+  .spinner {
+    display: inline-block;
+    width: 24px;
+    height: 24px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-right: 0.5rem;
+    vertical-align: middle;
+  }
+  
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+  
+  /* Modal */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(13, 17, 23, 0.9);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+  }
+  
+  .modal-overlay.visible {
+    display: flex;
+  }
+  
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    max-width: 800px;
+    width: 100%;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .modal-header {
+    padding: 1.2rem 1.5rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  
+  .modal-header h3 {
+    font-size: 1.1rem;
+  }
+  
+  .modal-close {
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 0.2em;
+    line-height: 1;
+  }
+  
+  .modal-close:hover {
+    color: var(--text);
+  }
+  
+  .modal-body {
+    padding: 1.5rem;
+    overflow-y: auto;
+    flex: 1;
+  }
+  
+  .modal-body pre {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem;
+    overflow-x: auto;
+    font-size: 0.85rem;
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#f85149" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+    </svg>
+    <h1>HeartBeat Admin Dashboard</h1>
+  </div>
+  <div class="header-right">
+    <span style="color:var(--muted);font-size:0.85rem;">训练数据管理</span>
+    <button class="logout-btn" onclick="logout()">退出登录</button>
+  </div>
+</header>
+
+<main>
+  <!-- Stats -->
+  <div class="stats-grid" id="stats-grid">
+    <div class="stat-card">
+      <div class="label">总会话数</div>
+      <div class="value" id="stat-total">--</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">用户数量</div>
+      <div class="value" id="stat-users">--</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">数据总量</div>
+      <div class="value" id="stat-size">--</div>
+    </div>
+  </div>
+  
+  <!-- Filters -->
+  <div class="filter-section">
+    <div class="filter-row">
+      <div class="filter-group">
+        <label>用户名搜索</label>
+        <input type="text" id="filter-username" placeholder="输入用户名..." />
+      </div>
+      <div class="filter-group">
+        <label>训练类型</label>
+        <select id="filter-type">
+          <option value="">全部类型</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>排序字段</label>
+        <select id="sort-by">
+          <option value="date">日期</option>
+          <option value="username">用户名</option>
+          <option value="type">训练类型</option>
+          <option value="bpm_avg">平均心率</option>
+          <option value="hrv_rmssd">HRV RMSSD</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>排序方式</label>
+        <select id="sort-order">
+          <option value="desc">降序</option>
+          <option value="asc">升序</option>
+        </select>
+      </div>
+      <button class="filter-btn" onclick="loadSessions()">搜索</button>
+      <button class="filter-btn reset-btn" onclick="resetFilters()">重置</button>
+    </div>
+  </div>
+  
+  <!-- Actions -->
+  <div class="actions-bar">
+    <span class="info" id="result-info">加载中...</span>
+    <button class="action-btn primary" id="btn-download-zip" onclick="downloadSelectedZip()" disabled>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      下载选中 (ZIP)
+    </button>
+    <button class="action-btn" id="btn-download-filtered" onclick="downloadFilteredZip()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      下载筛选结果 (ZIP)
+    </button>
+    <button class="action-btn" onclick="selectAll()">全选</button>
+    <button class="action-btn" onclick="selectNone()">取消全选</button>
+  </div>
+  
+  <!-- Table -->
+  <div class="table-container">
+    <table id="sessions-table">
+      <thead>
+        <tr>
+          <th class="checkbox-col"><input type="checkbox" id="select-all-header" onchange="toggleSelectAll()"></th>
+          <th class="sortable" data-sort="date">日期时间</th>
+          <th class="sortable" data-sort="username">用户名</th>
+          <th class="sortable" data-sort="type">训练类型</th>
+          <th class="sortable" data-sort="bpm_avg">平均心率</th>
+          <th class="sortable" data-sort="hrv_rmssd">HRV</th>
+          <th>RR数量</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="table-body">
+        <tr><td colspan="8" class="loading"><span class="spinner"></span>加载中...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</main>
+
+<!-- JSON Preview Modal -->
+<div class="modal-overlay" id="preview-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>会话详情</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <pre id="json-preview"></pre>
+    </div>
+  </div>
+</div>
+
+<script>
+// State
+let sessions = [];
+let selectedFiles = new Set();
+let trainingTypes = [];
+
+// Load stats
+async function loadStats() {
+  try {
+    const resp = await fetch('/api/admin/sessions/stats');
+    const data = await resp.json();
+    if (data.ok) {
+      document.getElementById('stat-total').textContent = data.stats.total_sessions;
+      document.getElementById('stat-users').textContent = data.stats.unique_users;
+      document.getElementById('stat-size').textContent = formatBytes(data.stats.total_size_bytes);
+    }
+  } catch (err) {
+    console.error('Failed to load stats:', err);
+  }
+}
+
+// Load sessions
+async function loadSessions() {
+  const tbody = document.getElementById('table-body');
+  tbody.innerHTML = '<tr><td colspan="8" class="loading"><span class="spinner"></span>加载中...</td></tr>';
+  
+  const params = new URLSearchParams();
+  const username = document.getElementById('filter-username').value.trim();
+  const type = document.getElementById('filter-type').value;
+  const sortBy = document.getElementById('sort-by').value;
+  const sortOrder = document.getElementById('sort-order').value;
+  
+  if (username) params.append('username', username);
+  if (type) params.append('training_type', type);
+  params.append('sort_by', sortBy);
+  params.append('sort_order', sortOrder);
+  params.append('limit', '1000');
+  
+  try {
+    const resp = await fetch(`/api/admin/sessions?${params}`);
+    const data = await resp.json();
+    
+    if (data.ok) {
+      sessions = data.sessions;
+      trainingTypes = data.training_types || [];
+      updateTypeFilter();
+      renderTable();
+      updateStats();
+    } else {
+      tbody.innerHTML = `<tr><td colspan="8" class="empty-state">加载失败: ${data.error}</td></tr>`;
+    }
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="8" class="empty-state">加载失败，请重试</td></tr>`;
+  }
+}
+
+// Update type filter dropdown
+function updateTypeFilter() {
+  const select = document.getElementById('filter-type');
+  const currentVal = select.value;
+  select.innerHTML = '<option value="">全部类型</option>';
+  trainingTypes.forEach(t => {
+    const option = document.createElement('option');
+    option.value = t.value;
+    option.textContent = t.label;
+    select.appendChild(option);
+  });
+  select.value = currentVal;
+}
+
+// Render table
+function renderTable() {
+  const tbody = document.getElementById('table-body');
+  const info = document.getElementById('result-info');
+  
+  if (sessions.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="8" class="empty-state">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+          </svg>
+          <p>没有找到会话数据</p>
+        </td>
+      </tr>
+    `;
+    info.textContent = '共 0 条记录';
+    return;
+  }
+  
+  tbody.innerHTML = sessions.map(s => `
+    <tr>
+      <td class="checkbox-col">
+        <input type="checkbox" value="${s.filename}" 
+               ${selectedFiles.has(s.filename) ? 'checked' : ''} 
+               onchange="toggleSelect('${s.filename}')">
+      </td>
+      <td>${formatDate(s.timestamp)}</td>
+      <td class="cell-username">${escapeHtml(s.username)}</td>
+      <td><span class="cell-type type-${s.training_type}">${s.training_type_label}</span></td>
+      <td class="cell-number">${s.bpm_avg != null ? s.bpm_avg.toFixed(1) : '--'}</td>
+      <td class="cell-number">${s.hrv_rmssd != null ? s.hrv_rmssd.toFixed(1) : '--'}</td>
+      <td class="cell-number">${s.rr_count || 0}</td>
+      <td class="cell-actions">
+        <button class="icon-btn" onclick="viewSession('${s.filename}')">查看</button>
+        <button class="icon-btn" onclick="downloadSession('${s.filename}')">下载</button>
+      </td>
+    </tr>
+  `).join('');
+  
+  info.textContent = `共 ${sessions.length} 条记录${sessions.length >= 1000 ? ' (最多显示1000条)' : ''}`;
+  updateSelectAllCheckbox();
+  updateDownloadButton();
+}
+
+// Update stats
+function updateStats() {
+  document.getElementById('stat-total').textContent = sessions.length;
+}
+
+// Selection
+function toggleSelect(filename) {
+  if (selectedFiles.has(filename)) {
+    selectedFiles.delete(filename);
+  } else {
+    selectedFiles.add(filename);
+  }
+  updateSelectAllCheckbox();
+  updateDownloadButton();
+}
+
+function toggleSelectAll() {
+  const headerCheckbox = document.getElementById('select-all-header');
+  if (headerCheckbox.checked) {
+    sessions.forEach(s => selectedFiles.add(s.filename));
+  } else {
+    sessions.forEach(s => selectedFiles.delete(s.filename));
+  }
+  renderTable();
+  updateDownloadButton();
+}
+
+function selectAll() {
+  sessions.forEach(s => selectedFiles.add(s.filename));
+  renderTable();
+}
+
+function selectNone() {
+  selectedFiles.clear();
+  renderTable();
+}
+
+function updateSelectAllCheckbox() {
+  const headerCheckbox = document.getElementById('select-all-header');
+  const allSelected = sessions.length > 0 && sessions.every(s => selectedFiles.has(s.filename));
+  headerCheckbox.checked = allSelected;
+}
+
+function updateDownloadButton() {
+  const btn = document.getElementById('btn-download-zip');
+  btn.disabled = selectedFiles.size === 0;
+  btn.innerHTML = `
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+    下载选中 (${selectedFiles.size})
+  `;
+}
+
+// Downloads
+function downloadSession(filename) {
+  window.location.href = `/api/admin/sessions/download/${encodeURIComponent(filename)}`;
+}
+
+async function downloadSelectedZip() {
+  if (selectedFiles.size === 0) return;
+  await downloadZip({ filenames: Array.from(selectedFiles) });
+}
+
+async function downloadFilteredZip() {
+  const username = document.getElementById('filter-username').value.trim();
+  const type = document.getElementById('filter-type').value;
+  await downloadZip({ username, training_type: type });
+}
+
+async function downloadZip(body) {
+  const btn = document.getElementById('btn-download-filtered');
+  btn.disabled = true;
+  btn.textContent = '打包中...';
+  
+  try {
+    const resp = await fetch('/api/admin/sessions/download-zip', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    
+    if (resp.ok) {
+      const blob = await resp.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `heartbeat_sessions_${new Date().toISOString().slice(0, 10)}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } else {
+      const data = await resp.json();
+      alert('下载失败: ' + (data.error || '未知错误'));
+    }
+  } catch (err) {
+    alert('下载失败: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = `
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      下载筛选结果 (ZIP)
+    `;
+  }
+}
+
+// View session
+async function viewSession(filename) {
+  try {
+    const resp = await fetch(`/api/admin/sessions/view/${encodeURIComponent(filename)}`);
+    const data = await resp.json();
+    document.getElementById('json-preview').textContent = JSON.stringify(data, null, 2);
+    document.getElementById('preview-modal').classList.add('visible');
+  } catch (err) {
+    alert('加载失败: ' + err.message);
+  }
+}
+
+function closeModal() {
+  document.getElementById('preview-modal').classList.remove('visible');
+}
+
+// Reset filters
+function resetFilters() {
+  document.getElementById('filter-username').value = '';
+  document.getElementById('filter-type').value = '';
+  document.getElementById('sort-by').value = 'date';
+  document.getElementById('sort-order').value = 'desc';
+  loadSessions();
+}
+
+// Logout
+async function logout() {
+  await fetch('/admin/logout', { method: 'POST' });
+  window.location.href = '/admin/login';
+}
+
+// Helpers
+function formatDate(isoString) {
+  if (!isoString) return '--';
+  const date = new Date(isoString);
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function formatBytes(bytes) {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// Header sort click handlers
+document.querySelectorAll('th.sortable').forEach(th => {
+  th.addEventListener('click', () => {
+    const sortBy = th.dataset.sort;
+    const currentSortBy = document.getElementById('sort-by').value;
+    const currentOrder = document.getElementById('sort-order').value;
+    
+    let newOrder = 'desc';
+    if (currentSortBy === sortBy) {
+      newOrder = currentOrder === 'desc' ? 'asc' : 'desc';
+    }
+    
+    document.getElementById('sort-by').value = sortBy;
+    document.getElementById('sort-order').value = newOrder;
+    
+    // Update visual indicators
+    document.querySelectorAll('th.sortable').forEach(t => {
+      t.classList.remove('sort-asc', 'sort-desc');
+    });
+    th.classList.add(newOrder === 'asc' ? 'sort-asc' : 'sort-desc');
+    
+    loadSessions();
+  });
+});
+
+// Modal close on backdrop click
+document.getElementById('preview-modal').addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) {
+    closeModal();
+  }
+});
+
+// Init
+loadStats();
+loadSessions();
+</script>
+
+</body>
+</html>

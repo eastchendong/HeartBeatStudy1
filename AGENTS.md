@@ -68,9 +68,13 @@ HeartBeatStudy1/
 │   │   ├── results.py         # Scene: results (stop, reset, save_session, sessions)
 │   │   ├── relay.py           # BLE relay management (search, connect, disconnect)
 │   │   ├── buteyko.py         # Buteyko breathing (breath hold protocol)
+│   │   ├── auth.py            # Admin authentication (login/logout)
+│   │   ├── admin_api.py       # Admin API for session data management
 │   │   └── utils.py           # Shared route utilities
 │   ├── templates/
-│   │   └── index.html         # Single-page breathing guidance UI
+│   │   ├── index.html         # Single-page breathing guidance UI
+│   │   ├── login.html         # Admin login page
+│   │   └── admin.html         # Admin dashboard for session management
 │   └── data/sessions/         # JSON session persistence (gitignored)
 │
 ├── arduino/
@@ -309,6 +313,55 @@ Saved sessions are JSON files in `server/data/sessions/`:
 
 ---
 
+## Admin Interface
+
+A web-based admin dashboard is available at `/admin` for managing session data. Access requires authentication.
+
+### Access
+
+1. Navigate to `/admin/login`
+2. Login with admin credentials (configured via environment variables)
+3. After successful login, access the dashboard at `/admin`
+
+### Environment Variables
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `HEARTBEAT_ADMIN_USER` | Admin username | `admin` |
+| `HEARTBEAT_ADMIN_PASS` | Admin password | `admin` |
+| `HEARTBEAT_SECRET_KEY` | Flask session secret key | Random 32 bytes |
+
+### Features
+
+The admin dashboard provides:
+
+- **Statistics Overview**: Total sessions, unique users, data storage size
+- **Search**: Filter sessions by username (partial match)
+- **Filter by Type**: Buteyko, PRBF, Resonance breathing types
+- **Sort**: By date, username, training type, BPM avg, HRV RMSSD
+- **Individual Actions**:
+  - View JSON data (preview modal)
+  - Download single JSON file
+- **Bulk Actions**:
+  - Select multiple sessions via checkboxes
+  - Download selected as ZIP
+  - Download all filtered results as ZIP
+
+### Admin API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/admin/login` | GET/POST | Login page and authentication |
+| `/admin/logout` | POST/GET | Logout and clear session |
+| `/admin/check` | GET | Check authentication status |
+| `/api/admin/sessions` | GET | List/filter/sort sessions |
+| `/api/admin/sessions/stats` | GET | Get overall statistics |
+| `/api/admin/sessions/view/<filename>` | GET | Preview session JSON |
+| `/api/admin/sessions/download/<filename>` | GET | Download single JSON |
+| `/api/admin/sessions/download-zip` | POST | Bulk download as ZIP |
+
+---
+
 ## Common Tasks
 
 ### Adding a New API Endpoint
@@ -343,7 +396,10 @@ Saved sessions are JSON files in `server/data/sessions/`:
 
 - HTTPS is enforced in production (nginx redirect)
 - Web Bluetooth requires HTTPS or localhost
-- Session IDs are simple strings—no auth currently implemented
+- Session IDs are simple strings—no auth for regular users
+- **Admin interface** uses Flask sessions for authentication; always use HTTPS in production
+- Change default admin credentials via environment variables (`HEARTBEAT_ADMIN_USER`, `HEARTBEAT_ADMIN_PASS`)
+- Set a persistent `HEARTBEAT_SECRET_KEY` for production (otherwise sessions are invalidated on restart)
 - BLE relay subprocess has access to system Bluetooth
 
 ---

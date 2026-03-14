@@ -10,8 +10,11 @@ Blueprints
   routes/training.py   – training-scene (pulse, stream, start, pause, play, status)
   routes/results.py    – results-scene  (stop, reset, save_session, sessions)
   routes/relay.py      – BLE relay management (search, connect, disconnect, status)
+  routes/auth.py       – Admin authentication (login, logout)
+  routes/admin_api.py  – Admin API for session management
 """
 
+import os
 from flask import Flask, render_template
 from flask_cors import CORS
 
@@ -20,8 +23,14 @@ from routes.training import training_bp
 from routes.results import results_bp
 from routes.relay import relay_bp
 from routes.buteyko import buteyko_bp
+from routes.auth import auth_bp
+from routes.admin_api import admin_api_bp
 
 app = Flask(__name__)
+
+# Configure secret key for sessions (required for admin auth)
+app.secret_key = os.environ.get("HEARTBEAT_SECRET_KEY", os.urandom(32))
+
 CORS(app)
 
 # Register blueprints
@@ -30,6 +39,8 @@ app.register_blueprint(training_bp)
 app.register_blueprint(results_bp)
 app.register_blueprint(relay_bp)
 app.register_blueprint(buteyko_bp)
+app.register_blueprint(auth_bp)
+app.register_blueprint(admin_api_bp)
 
 
 @app.route("/")

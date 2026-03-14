@@ -52,16 +52,25 @@ def _elapsed_seconds(sess: SessionState) -> float:
 
 
 def _make_payload(sess: SessionState, bpm: float, rmssd: float | None, cycle: float) -> dict:
-    half = round(cycle / 2, 1)
     session_dur = _get_session_duration(sess)
     remaining = max(0.0, session_dur - _elapsed_seconds(sess)) if sess.session_active else session_dur
+    
+    # Calculate inhale/exhale based on configured ratio
+    inhale_ratio = int(sess.session_config.get("inhale_ratio", 5))
+    exhale_ratio = int(sess.session_config.get("exhale_ratio", 5))
+    total_ratio = inhale_ratio + exhale_ratio
+    inhale = round(cycle * inhale_ratio / total_ratio, 1)
+    exhale = round(cycle * exhale_ratio / total_ratio, 1)
+    
     return {
         "bpm":               round(bpm, 1),
         "hrv_rmssd":         round(rmssd, 1) if rmssd is not None else None,
         "lf_power":          round(sess.latest_lf_power, 4) if sess.latest_lf_power is not None else None,
         "total":             cycle,
-        "inhale":            half,
-        "exhale":            half,
+        "inhale":            inhale,
+        "exhale":            exhale,
+        "inhale_ratio":      inhale_ratio,
+        "exhale_ratio":      exhale_ratio,
         "session_remaining": round(remaining),
         "session_duration":  round(session_dur),
         "paused":            sess.paused,

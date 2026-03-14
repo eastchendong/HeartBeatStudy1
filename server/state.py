@@ -42,6 +42,8 @@ class SessionState:
             "session_duration": 120,    # seconds (default 2 min)
             "adaptive": True,           # auto-adjust cycle with HRV
             "username": "",             # optional
+            "inhale_ratio": 4,          # inhale ratio (e.g., 4 for 4:6)
+            "exhale_ratio": 6,          # exhale ratio (e.g., 6 for 4:6)
         }
 
         # ── Core mutable state ─────────────────────────────────────────────────
