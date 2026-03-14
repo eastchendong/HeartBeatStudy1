@@ -138,6 +138,7 @@ ExecStart=${APP_DIR}/venv/bin/python ${APP_DIR}/app.py
 Restart=on-failure
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-${APP_DIR}/.env
 
 [Install]
 WantedBy=multi-user.target

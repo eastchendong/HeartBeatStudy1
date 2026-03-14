@@ -18,6 +18,7 @@ from flask import Blueprint, jsonify, request, send_file, abort
 
 import state
 from routes.auth import admin_required
+from hrv import compute_lf_power, compute_rmssd
 
 admin_api_bp = Blueprint("admin_api", __name__)
 
@@ -298,5 +299,21 @@ def view_session(filename: str):
         "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
         "training_type": detect_training_type(data),
     }
+    
+    # Recalculate HRV metrics from RR intervals for accuracy
+    rr_intervals = data.get("rr_intervals_ms", []) or data.get("rr_intervals", [])
+    if rr_intervals and len(rr_intervals) >= 30:
+        # Recalculate LF Power from RR intervals
+        lf_power = compute_lf_power(rr_intervals)
+        if lf_power is not None:
+            data["_admin_meta"]["lf_power_calculated"] = round(lf_power, 4)
+            # Also update the main data for consistency
+            data["lf_power"] = round(lf_power, 4)
+        
+        # Recalculate RMSSD
+        rmssd = compute_rmssd(rr_intervals)
+        if rmssd is not None:
+            data["_admin_meta"]["hrv_rmssd_calculated"] = round(rmssd, 2)
+            data["hrv_rmssd"] = round(rmssd, 2)
     
     return jsonify(data)

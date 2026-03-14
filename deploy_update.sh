@@ -57,6 +57,7 @@ echo "==> [1/3] Syncing latest server code..."
     --exclude '*.pyc' \
     --exclude 'venv/' \
     --exclude 'data/sessions/' \
+    --exclude '.env' \
     -e "${SSH_CMD[*]}" \
     "$LOCAL_SERVER_DIR/" "$REMOTE_TARGET:$APP_DIR/"
 

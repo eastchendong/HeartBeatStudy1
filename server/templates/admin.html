@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Admin Dashboard · HeartBeat</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   
@@ -453,6 +454,93 @@
     font-size: 0.85rem;
     line-height: 1.5;
   }
+  
+  /* Analysis Modal */
+  .modal-large {
+    max-width: 1200px;
+  }
+  
+  .charts-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+  }
+  
+  .chart-card {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1rem;
+  }
+  
+  .chart-card h4 {
+    font-size: 0.9rem;
+    color: var(--muted);
+    margin-bottom: 0.8rem;
+    text-align: center;
+  }
+  
+  .chart-container {
+    position: relative;
+    height: 200px;
+  }
+  
+  /* Metrics Table */
+  .metrics-section {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-top: 1rem;
+  }
+  
+  .metrics-section h4 {
+    font-size: 1rem;
+    margin-bottom: 1rem;
+    color: var(--accent);
+  }
+  
+  .metrics-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+  }
+  
+  .metrics-table th,
+  .metrics-table td {
+    padding: 0.6em 0.8em;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  
+  .metrics-table th {
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+  }
+  
+  .metrics-table tr:hover {
+    background: rgba(88, 166, 255, 0.05);
+  }
+  
+  .metric-best {
+    color: var(--green);
+    font-weight: 600;
+  }
+  
+  .analysis-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+  
+  .empty-analysis {
+    text-align: center;
+    padding: 3rem;
+    color: var(--muted);
+  }
 </style>
 </head>
 <body>
@@ -535,6 +623,10 @@
     </button>
     <button class="action-btn" onclick="selectAll()">全选</button>
     <button class="action-btn" onclick="selectNone()">取消全选</button>
+    <button class="action-btn" id="btn-analyze" onclick="analyzeSelected()" disabled>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18.7 8l-5.1 5.2-2.8-2.7L7 14.3"/></svg>
+      数据分析
+    </button>
   </div>
   
   <!-- Table -->
@@ -572,11 +664,28 @@
   </div>
 </div>
 
+<!-- Data Analysis Modal -->
+<div class="modal-overlay" id="analysis-modal">
+  <div class="modal modal-large">
+    <div class="modal-header">
+      <h3>数据分析 - 心率趋势与PRBF指标</h3>
+      <button class="modal-close" onclick="closeAnalysisModal()">&times;</button>
+    </div>
+    <div class="modal-body" id="analysis-body">
+      <div class="empty-analysis">
+        <div class="spinner"></div>
+        <p>正在加载数据...</p>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 // State
 let sessions = [];
 let selectedFiles = new Set();
 let trainingTypes = [];
+let analysisCharts = [];  // Store chart instances for cleanup
 
 // Load stats
 async function loadStats() {
@@ -740,6 +849,10 @@ function updateDownloadButton() {
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
     下载选中 (${selectedFiles.size})
   `;
+  
+  // Update analyze button
+  const analyzeBtn = document.getElementById('btn-analyze');
+  analyzeBtn.disabled = selectedFiles.size === 0;
 }
 
 // Downloads
@@ -809,6 +922,283 @@ async function viewSession(filename) {
 
 function closeModal() {
   document.getElementById('preview-modal').classList.remove('visible');
+}
+
+// ==================== DATA ANALYSIS ====================
+
+function closeAnalysisModal() {
+  document.getElementById('analysis-modal').classList.remove('visible');
+  // Cleanup charts
+  analysisCharts.forEach(chart => chart.destroy());
+  analysisCharts = [];
+}
+
+async function analyzeSelected() {
+  if (selectedFiles.size === 0) return;
+  
+  const modal = document.getElementById('analysis-modal');
+  const body = document.getElementById('analysis-body');
+  modal.classList.add('visible');
+  
+  body.innerHTML = `
+    <div class="empty-analysis">
+      <div class="spinner"></div>
+      <p>正在加载 ${selectedFiles.size} 个会话数据...</p>
+    </div>
+  `;
+  
+  // Load all selected session data
+  const sessionData = [];
+  for (const filename of selectedFiles) {
+    try {
+      const resp = await fetch(`/api/admin/sessions/view/${encodeURIComponent(filename)}`);
+      const data = await resp.json();
+      sessionData.push({ filename, data });
+    } catch (err) {
+      console.error('Failed to load:', filename);
+    }
+  }
+  
+  renderAnalysis(sessionData);
+}
+
+function renderAnalysis(sessionData) {
+  const body = document.getElementById('analysis-body');
+  
+  if (sessionData.length === 0) {
+    body.innerHTML = '<div class="empty-analysis">无法加载数据</div>';
+    return;
+  }
+  
+  // Remove duplicates by filename
+  const seen = new Set();
+  sessionData = sessionData.filter(item => {
+    if (seen.has(item.filename)) return false;
+    seen.add(item.filename);
+    return true;
+  });
+  
+  // Cleanup existing charts
+  analysisCharts.forEach(chart => chart.destroy());
+  analysisCharts = [];
+  
+  // Build HTML
+  let html = '<div class="charts-grid">';
+  
+  // Generate a chart for each session
+  sessionData.forEach((item, index) => {
+    const username = item.data.username || 'anonymous';
+    const timestamp = formatDate(item.data.timestamp);
+    const bpmReadings = item.data.bpm_readings || [];
+    
+    html += `
+      <div class="chart-card">
+        <h4>${username} - ${timestamp}</h4>
+        <div class="chart-container">
+          <canvas id="bpm-chart-${index}"></canvas>
+        </div>
+      </div>
+    `;
+  });
+  
+  html += '</div>';
+  
+  // Add PRBF metrics comparison table if any session has PRBF-like data
+  const hasPrbfData = sessionData.some(item => {
+    const config = item.data.config || {};
+    const breathCycle = config.breath_cycle || 10;
+    return breathCycle >= 9 && breathCycle <= 14; // 4.5-6.5 bpm = 9-13s cycle
+  });
+  
+  if (hasPrbfData && sessionData.length > 1) {
+    html += buildPrbfMetricsTable(sessionData);
+  }
+  
+  body.innerHTML = html;
+  
+  // Initialize charts after DOM update
+  setTimeout(() => {
+    sessionData.forEach((item, index) => {
+      initBpmChart(`bpm-chart-${index}`, item.data);
+    });
+  }, 100);
+}
+
+function initBpmChart(canvasId, data) {
+  const bpmReadings = data.bpm_readings || [];
+  if (bpmReadings.length === 0) {
+    const canvas = document.getElementById(canvasId);
+    if (canvas) {
+      canvas.parentElement.innerHTML = '<p style="text-align:center;color:var(--muted)">无BPM数据</p>';
+    }
+    return;
+  }
+  
+  // Generate time labels (assuming evenly distributed over 2 minutes)
+  const labels = bpmReadings.map((_, i) => {
+    const seconds = (i / (bpmReadings.length - 1 || 1)) * 120;
+    return Math.round(seconds) + 's';
+  });
+  
+  const ctx = document.getElementById(canvasId).getContext('2d');
+  const chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'BPM',
+        data: bpmReadings,
+        borderColor: '#58a6ff',
+        backgroundColor: 'rgba(88, 166, 255, 0.1)',
+        borderWidth: 2,
+        pointRadius: 0,
+        pointHoverRadius: 4,
+        fill: true,
+        tension: 0.3
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: {
+        mode: 'index',
+        intersect: false
+      },
+      plugins: {
+        legend: {
+          display: false
+        },
+        tooltip: {
+          backgroundColor: 'rgba(13, 17, 23, 0.9)',
+          titleColor: '#e6edf3',
+          bodyColor: '#e6edf3',
+          borderColor: '#30363d',
+          borderWidth: 1
+        }
+      },
+      scales: {
+        x: {
+          display: true,
+          grid: {
+            color: '#30363d',
+            drawBorder: false
+          },
+          ticks: {
+            color: '#8b949e',
+            maxTicksLimit: 6
+          }
+        },
+        y: {
+          display: true,
+          grid: {
+            color: '#30363d',
+            drawBorder: false
+          },
+          ticks: {
+            color: '#8b949e'
+          }
+        }
+      }
+    }
+  });
+  
+  analysisCharts.push(chart);
+}
+
+function buildPrbfMetricsTable(sessionData) {
+  // Calculate metrics for each session
+  const metrics = sessionData.map(item => {
+    const data = item.data;
+    const bpmReadings = data.bpm_readings || [];
+    const config = data.config || {};
+    const breathCycle = config.breath_cycle || 10;
+    
+    // Calculate HR Max - HR Min for the session
+    let hrMaxMin = null;
+    if (bpmReadings.length > 0) {
+      const hrMax = Math.max(...bpmReadings);
+      const hrMin = Math.min(...bpmReadings);
+      hrMaxMin = hrMax - hrMin;
+    }
+    
+    // Get LF Power from calculated value (recalculated from RR intervals in backend)
+    // Use _admin_meta.lf_power_calculated if available, fallback to data.lf_power
+    const adminMeta = data._admin_meta || {};
+    const lfPower = adminMeta.lf_power_calculated !== undefined ? adminMeta.lf_power_calculated : (data.lf_power || null);
+    
+    return {
+      filename: item.filename,
+      username: data.username || 'anonymous',
+      timestamp: formatDate(data.timestamp),
+      breathCycle: breathCycle,
+      frequency: (60 / breathCycle).toFixed(2), // breaths per minute
+      lfPower: lfPower,
+      hrMaxMin: hrMaxMin,
+      bpmAvg: data.bpm_avg,
+      bpmMax: bpmReadings.length > 0 ? Math.max(...bpmReadings) : null,
+      bpmMin: bpmReadings.length > 0 ? Math.min(...bpmReadings) : null,
+    };
+  });
+  
+  // Find best (max LF Power)
+  const validLf = metrics.filter(m => m.lfPower !== null);
+  const bestLf = validLf.length > 0 
+    ? validLf.reduce((max, m) => m.lfPower > max.lfPower ? m : max)
+    : null;
+  
+  // Find best (max HR Max-Min)
+  const validHrRange = metrics.filter(m => m.hrMaxMin !== null);
+  const bestHrRange = validHrRange.length > 0
+    ? validHrRange.reduce((max, m) => m.hrMaxMin > max.hrMaxMin ? m : max)
+    : null;
+  
+  let html = `
+    <div class="metrics-section">
+      <h4>PRBF 测试指标对比 (4.5-6.5 次/min 范围)</h4>
+      <table class="metrics-table">
+        <thead>
+          <tr>
+            <th>用户</th>
+            <th>时间</th>
+            <th>呼吸频率<br>(次/min)</th>
+            <th>呼吸周期<br>(秒)</th>
+            <th>LF Power<br>(ms²) <span style="color:var(--green)">↑</span></th>
+            <th>HR Max-Min<br>(bpm) <span style="color:var(--green)">↑</span></th>
+            <th>平均心率</th>
+          </tr>
+        </thead>
+        <tbody>
+  `;
+  
+  metrics.forEach(m => {
+    const isBestLf = bestLf && m.filename === bestLf.filename;
+    const isBestHr = bestHrRange && m.filename === bestHrRange.filename;
+    
+    html += `
+      <tr>
+        <td>${escapeHtml(m.username)}</td>
+        <td>${m.timestamp}</td>
+        <td>${m.frequency}</td>
+        <td>${m.breathCycle.toFixed(1)}s</td>
+        <td class="${isBestLf ? 'metric-best' : ''}">${m.lfPower !== null ? m.lfPower.toFixed(4) : '--'}</td>
+        <td class="${isBestHr ? 'metric-best' : ''}">${m.hrMaxMin !== null ? m.hrMaxMin.toFixed(1) : '--'}</td>
+        <td>${m.bpmAvg !== null ? m.bpmAvg.toFixed(1) : '--'}</td>
+      </tr>
+    `;
+  });
+  
+  html += `
+        </tbody>
+      </table>
+      <p style="margin-top:0.8rem;color:var(--muted);font-size:0.8rem;">
+        <span style="color:var(--green)">●</span> 最优指标 &nbsp;|&nbsp; 
+        LF Power: 低频功率 (0.04–0.15 Hz)，数值越大越接近共振频率 &nbsp;|&nbsp; 
+        HR Max-Min: 心率峰谷波动，数值越大表示心率变异性越好
+      </p>
+    </div>
+  `;
+  
+  return html;
 }
 
 // Reset filters
