@@ -8,9 +8,10 @@ and listing past sessions.
 import json
 import time
 import uuid
+import shutil
 from datetime import datetime, timezone
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, send_from_directory, abort, url_for
 
 import state
 from routes.utils import get_current_session
@@ -92,9 +93,16 @@ def save_session():
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(session_record, f, ensure_ascii=False, indent=2)
 
+    mirrored_to = None
+    if state.SHARED_DATA_DIR is not None:
+        shared_file = state.SHARED_DATA_DIR / filename
+        shutil.copy2(filepath, shared_file)
+        mirrored_to = str(shared_file)
+
     return jsonify({
         "ok":   True,
         "file": str(filepath.name),
+        "mirrored_to": mirrored_to,
         "summary": {
             "bpm_max":   session_record["bpm_max"],
             "bpm_min":   session_record["bpm_min"],
@@ -124,3 +132,33 @@ def list_sessions():
         except Exception:
             pass
     return jsonify({"sessions": results})
+
+
+@results_bp.route("/api/sessions/files")
+def list_session_files():
+    files = sorted(state.DATA_DIR.glob("session_*.json"), reverse=True)
+    items = []
+    for f in files:
+        stat = f.stat()
+        items.append({
+            "file": f.name,
+            "size_bytes": stat.st_size,
+            "mtime_utc": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+            "download_url": url_for("results.download_session_file", filename=f.name, _external=True),
+        })
+
+    return jsonify({
+        "files": items,
+        "data_dir": str(state.DATA_DIR),
+        "shared_dir": str(state.SHARED_DATA_DIR) if state.SHARED_DATA_DIR else None,
+    })
+
+
+@results_bp.route("/api/sessions/files/<path:filename>")
+def download_session_file(filename: str):
+    if not filename.endswith(".json") or "/" in filename or "\\" in filename:
+        abort(400, description="invalid filename")
+    target = state.DATA_DIR / filename
+    if not target.exists() or not target.is_file():
+        abort(404)
+    return send_from_directory(state.DATA_DIR, filename, as_attachment=True)

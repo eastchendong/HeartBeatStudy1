@@ -164,3 +164,36 @@ for bpm in 65 68 72 80 90 105 112 118 108 95 82; do
   sleep 2
 done
 ```
+
+---
+
+## Session JSON external access (no database)
+
+This project now supports a lightweight file-first export approach, so you do not need to SSH into the server to fetch session JSON files.
+
+### 1) HTTP API access
+
+- List available files:
+
+```bash
+curl http://localhost:5000/api/sessions/files
+```
+
+- Download one file:
+
+```bash
+curl -L -o session.json http://localhost:5000/api/sessions/files/session_YYYYMMDD_HHMMSS_xxxxxxxx.json
+```
+
+### 2) Optional shared-folder mirror
+
+If you want JSON files mirrored to a shared location (for example a mounted Windows folder, NAS, or team share), set this environment variable before starting Flask:
+
+```bash
+export HEARTBEAT_SHARED_SESSION_DIR=/path/to/shared/sessions
+python app.py
+```
+
+When enabled, every newly saved session file is copied to that shared folder automatically.
+
+This keeps the stack simple and matches your workflow (save JSON now, analyze/download later) without adding database complexity.

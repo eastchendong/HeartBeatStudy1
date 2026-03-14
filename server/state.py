@@ -8,6 +8,7 @@ State is now encapsulated in `SessionState` objects, stored in a global `session
 import queue
 import time
 import subprocess
+import os
 from collections import deque
 from pathlib import Path
 from threading import Lock
@@ -16,6 +17,15 @@ from typing import Dict, Optional, List, Deque
 # ── Data directory for JSON persistence ────────────────────────────────────
 DATA_DIR = Path(__file__).resolve().parent / "data" / "sessions"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+# Optional shared/export directory for easy external access.
+# Configure with env: HEARTBEAT_SHARED_SESSION_DIR=/path/to/shared/folder
+SHARED_DATA_DIR = None
+_shared_dir_raw = os.environ.get("HEARTBEAT_SHARED_SESSION_DIR", "").strip()
+if _shared_dir_raw:
+    _candidate = Path(_shared_dir_raw).expanduser().resolve()
+    _candidate.mkdir(parents=True, exist_ok=True)
+    SHARED_DATA_DIR = _candidate
 
 # ── HRV adaptive constants ────────────────────────────────────────────────
 HRV_WINDOW     = 8
