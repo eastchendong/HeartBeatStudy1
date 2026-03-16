@@ -4,7 +4,6 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Admin Dashboard · HeartBeat</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   
@@ -484,6 +483,7 @@
   .chart-container {
     position: relative;
     height: 200px;
+    width: 100%;
   }
   
   /* Metrics Table */
@@ -685,7 +685,6 @@
 let sessions = [];
 let selectedFiles = new Set();
 let trainingTypes = [];
-let analysisCharts = [];  // Store chart instances for cleanup
 
 // Load stats
 async function loadStats() {
@@ -928,9 +927,6 @@ function closeModal() {
 
 function closeAnalysisModal() {
   document.getElementById('analysis-modal').classList.remove('visible');
-  // Cleanup charts
-  analysisCharts.forEach(chart => chart.destroy());
-  analysisCharts = [];
 }
 
 async function analyzeSelected() {
@@ -978,10 +974,6 @@ function renderAnalysis(sessionData) {
     return true;
   });
   
-  // Cleanup existing charts
-  analysisCharts.forEach(chart => chart.destroy());
-  analysisCharts = [];
-  
   // Build HTML
   let html = '<div class="charts-grid">';
   
@@ -994,9 +986,7 @@ function renderAnalysis(sessionData) {
     html += `
       <div class="chart-card">
         <h4>${username} - ${timestamp}</h4>
-        <div class="chart-container">
-          <canvas id="bpm-chart-${index}"></canvas>
-        </div>
+        <div class="chart-container" id="bpm-chart-${index}"></div>
       </div>
     `;
   });
@@ -1018,91 +1008,99 @@ function renderAnalysis(sessionData) {
   
   // Initialize charts after DOM update
   setTimeout(() => {
+    console.log('Initializing charts for', sessionData.length, 'sessions');
     sessionData.forEach((item, index) => {
-      initBpmChart(`bpm-chart-${index}`, item.data);
+      console.log('Chart', index, ': bpm_readings length =', (item.data.bpm_readings || []).length);
+      renderSvgChart(`bpm-chart-${index}`, item.data);
     });
   }, 100);
 }
 
-function initBpmChart(canvasId, data) {
-  const bpmReadings = data.bpm_readings || [];
-  if (bpmReadings.length === 0) {
-    const canvas = document.getElementById(canvasId);
-    if (canvas) {
-      canvas.parentElement.innerHTML = '<p style="text-align:center;color:var(--muted)">无BPM数据</p>';
-    }
+function renderSvgChart(containerId, data) {
+  const container = document.getElementById(containerId);
+  if (!container) {
+    console.error('Container not found:', containerId);
     return;
   }
   
-  // Generate time labels (assuming evenly distributed over 2 minutes)
-  const labels = bpmReadings.map((_, i) => {
-    const seconds = (i / (bpmReadings.length - 1 || 1)) * 120;
-    return Math.round(seconds) + 's';
+  const bpmReadings = data.bpm_readings || [];
+  if (bpmReadings.length === 0) {
+    container.innerHTML = '<p style="text-align:center;color:var(--muted);padding:2rem;">无BPM数据</p>';
+    return;
+  }
+  
+  // SVG dimensions
+  const width = 320;
+  const height = 180;
+  const padding = { top: 10, right: 10, bottom: 25, left: 35 };
+  const chartWidth = width - padding.left - padding.right;
+  const chartHeight = height - padding.top - padding.bottom;
+  
+  // Calculate scales
+  const minBpm = Math.min(...bpmReadings);
+  const maxBpm = Math.max(...bpmReadings);
+  const bpmRange = maxBpm - minBpm || 1;
+  const bpmMin = Math.max(0, minBpm - bpmRange * 0.1);
+  const bpmMax = maxBpm + bpmRange * 0.1;
+  
+  // Generate SVG path
+  const points = bpmReadings.map((bpm, i) => {
+    const x = padding.left + (i / (bpmReadings.length - 1 || 1)) * chartWidth;
+    const y = padding.top + chartHeight - ((bpm - bpmMin) / (bpmMax - bpmMin)) * chartHeight;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
   });
   
-  const ctx = document.getElementById(canvasId).getContext('2d');
-  const chart = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: labels,
-      datasets: [{
-        label: 'BPM',
-        data: bpmReadings,
-        borderColor: '#58a6ff',
-        backgroundColor: 'rgba(88, 166, 255, 0.1)',
-        borderWidth: 2,
-        pointRadius: 0,
-        pointHoverRadius: 4,
-        fill: true,
-        tension: 0.3
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: {
-        mode: 'index',
-        intersect: false
-      },
-      plugins: {
-        legend: {
-          display: false
-        },
-        tooltip: {
-          backgroundColor: 'rgba(13, 17, 23, 0.9)',
-          titleColor: '#e6edf3',
-          bodyColor: '#e6edf3',
-          borderColor: '#30363d',
-          borderWidth: 1
-        }
-      },
-      scales: {
-        x: {
-          display: true,
-          grid: {
-            color: '#30363d',
-            drawBorder: false
-          },
-          ticks: {
-            color: '#8b949e',
-            maxTicksLimit: 6
-          }
-        },
-        y: {
-          display: true,
-          grid: {
-            color: '#30363d',
-            drawBorder: false
-          },
-          ticks: {
-            color: '#8b949e'
-          }
-        }
-      }
-    }
+  // Create smooth line using simple polyline
+  const pathD = `M ${points.join(' L ')}`;
+  
+  // Area fill path
+  const areaD = `${pathD} L ${padding.left + chartWidth},${padding.top + chartHeight} L ${padding.left},${padding.top + chartHeight} Z`;
+  
+  // Grid lines
+  const gridLines = [];
+  for (let i = 0; i <= 4; i++) {
+    const y = padding.top + (i / 4) * chartHeight;
+    gridLines.push(`<line x1="${padding.left}" y1="${y}" x2="${padding.left + chartWidth}" y2="${y}" stroke="#30363d" stroke-width="1"/>`);
+  }
+  
+  // Y-axis labels
+  const yLabels = [];
+  for (let i = 0; i <= 4; i++) {
+    const value = bpmMax - (i / 4) * (bpmMax - bpmMin);
+    const y = padding.top + (i / 4) * chartHeight;
+    yLabels.push(`<text x="${padding.left - 5}" y="${y + 3}" fill="#8b949e" font-size="10" text-anchor="end">${Math.round(value)}</text>`);
+  }
+  
+  // X-axis labels (0s, 30s, 60s, 90s, 120s)
+  const xLabels = [0, 30, 60, 90, 120].map(sec => {
+    const x = padding.left + (sec / 120) * chartWidth;
+    return `<text x="${x}" y="${height - 5}" fill="#8b949e" font-size="10" text-anchor="middle">${sec}s</text>`;
   });
   
-  analysisCharts.push(chart);
+  // Stats text
+  const avgBpm = (bpmReadings.reduce((a, b) => a + b, 0) / bpmReadings.length).toFixed(1);
+  
+  container.innerHTML = `
+    <svg viewBox="0 0 ${width} ${height}" style="width:100%;height:100%;">
+      <!-- Grid -->
+      ${gridLines.join('')}
+      
+      <!-- Area fill -->
+      <path d="${areaD}" fill="rgba(88, 166, 255, 0.1)" stroke="none"/>
+      
+      <!-- Line -->
+      <path d="${pathD}" fill="none" stroke="#58a6ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      
+      <!-- Y-axis labels -->
+      ${yLabels.join('')}
+      
+      <!-- X-axis labels -->
+      ${xLabels.join('')}
+      
+      <!-- Stats -->
+      <text x="${width - 10}" y="15" fill="#58a6ff" font-size="11" text-anchor="end" font-weight="600">Avg: ${avgBpm} BPM</text>
+    </svg>
+  `;
 }
 
 function buildPrbfMetricsTable(sessionData) {

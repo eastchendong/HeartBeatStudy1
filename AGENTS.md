@@ -371,6 +371,32 @@ The admin dashboard provides:
 3. Use `state.get_session(session_id)` to access session
 4. Update this AGENTS.md if the endpoint changes state model
 
+### CDI PRBF Test Page
+
+A dedicated page at `/cdi-prbf` for CDI research group's Personalized Resonance Frequency Breathing test:
+
+- **Protocol**: 10 frequency stages from 8.0 to 10.25 bpm (0.25 increment)
+- **Cycles**: 3 breathing cycles per frequency
+- **Metrics**: Records LF Power and RMSSD for each frequency
+- **Result**: Selects frequency with highest LF Power as PRBF
+
+**Files**:
+- `server/routes/cdi_prbf.py` - API routes
+- `server/templates/cdi_prbf.html` - Page template
+
+**API Endpoints**:
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/cdi-prbf` | GET | Page |
+| `/api/cdi-prbf/configure` | POST | Configure test |
+| `/api/cdi-prbf/start` | POST | Start test |
+| `/api/cdi-prbf/on-cycle-complete` | POST | Called when each cycle completes |
+| `/api/cdi-prbf/status` | GET | Get current status |
+| `/api/cdi-prbf/stop` | POST | Stop test early |
+| `/api/cdi-prbf/reset` | POST | Reset test state |
+| `/api/cdi-prbf/results` | GET | Get test results |
+| `/api/cdi-prbf/save` | POST | Save results to file |
+
 ### Adding a New State Field
 
 1. Add field to `SessionState.__init__()` in `state.py`

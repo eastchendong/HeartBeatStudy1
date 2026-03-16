@@ -1535,13 +1535,17 @@ function bpmToCycle(freq) {
 // ── PRBF Helper Functions ─────────────────────────────────────────────────
 function buildFrequencyList(start, end, count) {
   // Build exactly `count` frequencies evenly spaced from start to end
+  // Auto-detect direction: ascending if start < end, descending if start > end
   const list = [];
-  if (!(start > 0 && end > 0) || end < start || count < 1) return list;
+  if (!(start > 0 && end > 0) || count < 1) return list;
   if (count === 1) return [Math.round(start * 100) / 100];
+  const ascending = start < end;
   for (let i = 0; i < count; i++) {
     const f = start + (end - start) * i / (count - 1);
     list.push(Math.round(f * 100) / 100);
   }
+  // If descending (start > end), the list is already correct (from high to low)
+  // If ascending (start < end), the list is also correct (from low to high)
   return list;
 }
 
@@ -1549,7 +1553,9 @@ function updateTestSlots() {
   const start = parseFloat(adpFreqStart.value) || 6;
   const end = parseFloat(adpFreqEnd.value) || 8;
   const slots = buildFrequencyList(start, end, 5);
-  adpTestSlots.textContent = slots.map(f => f.toFixed(1)).join(' → ') + ' bpm（每档2分钟）';
+  // Auto-detect direction for display
+  const arrow = start > end ? ' ↓ ' : ' → ';
+  adpTestSlots.textContent = slots.map(f => f.toFixed(1)).join(arrow) + ' bpm（每档2分钟）';
 }
 
 adpFreqStart.addEventListener('input', updateTestSlots);

@@ -1,0 +1,1136 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CDI 共振呼吸测试</title>
+<style>
+  /* ── Reset & base ─────────────────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #0d1117;
+    --surface:   #161b22;
+    --border:    #30363d;
+    --text:      #e6edf3;
+    --muted:     #8b949e;
+    --accent:    #58a6ff;
+    --green:     #3fb950;
+    --yellow:    #d29922;
+    --red:       #f85149;
+    --inhale-color:  #58a6ff;
+    --exhale-color:  #3fb950;
+    --circle-size: clamp(200px, 35vmin, 300px);
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    min-height: 100vh;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+  }
+
+  /* ── Header ──────────────────────────────────────────────────────────── */
+  header {
+    padding: 1rem 2rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+  header h1 { font-size: 1.1rem; font-weight: 600; }
+  header .subtitle {
+    font-size: 0.75rem;
+    color: var(--muted);
+    padding: 0.2em 0.7em;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+  .header-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .pill {
+    font-size: 0.72rem;
+    padding: 0.2em 0.7em;
+    border-radius: 999px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+  }
+  #ble-btn {
+    background: var(--surface);
+    color: var(--accent);
+    border: 1px solid var(--border);
+    cursor: pointer;
+  }
+  #ble-btn:hover { background: var(--border); }
+  #relay-connect-btn, #relay-stop-btn {
+    background: var(--surface);
+    color: var(--accent);
+    border: 1px solid var(--border);
+    cursor: pointer;
+  }
+  .pill-connected    { background: #1a3d2b; color: var(--green); }
+  .pill-disconnected { background: #3d1a1a; color: var(--red);   }
+  .pill-waiting      { background: #2b2a1a; color: var(--yellow); }
+  #user-label {
+    font-size: 0.72rem;
+    color: var(--text);
+    padding: 0.2em 0.7em;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    font-family: monospace;
+  }
+
+  /* ── Screen management ───────────────────────────────────────────────── */
+  .screen { display: none; }
+  .screen.active { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 1.5rem; padding: 2rem 1rem; min-height: calc(100vh - 120px); }
+
+  /* ── START SCREEN ────────────────────────────────────────────────────── */
+  .intro-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 2rem 2.5rem;
+    max-width: 560px;
+    width: 90vw;
+  }
+  .intro-card h2 {
+    font-size: 1.3rem;
+    margin-bottom: 1rem;
+    color: var(--accent);
+    text-align: center;
+  }
+  .intro-card .desc {
+    font-size: 0.9rem;
+    color: var(--muted);
+    line-height: 1.6;
+    margin-bottom: 1.5rem;
+  }
+  .intro-card .protocol {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 1.5rem;
+  }
+  .protocol h3 {
+    font-size: 0.85rem;
+    color: var(--text);
+    margin-bottom: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .freq-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 0.5rem;
+    margin-bottom: 0.8rem;
+  }
+  .freq-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.4rem;
+    text-align: center;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+  .protocol-note {
+    font-size: 0.8rem;
+    color: var(--muted);
+    text-align: center;
+  }
+
+  .form-group {
+    margin-bottom: 1.2rem;
+  }
+  .form-group label {
+    display: block;
+    font-size: 0.82rem;
+    color: var(--muted);
+    margin-bottom: 0.35rem;
+    letter-spacing: 0.03em;
+  }
+  .form-group input[type="number"],
+  .form-group input[type="text"] {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.55em 0.8em;
+    color: var(--text);
+    font-size: 0.92rem;
+    outline: none;
+  }
+  .form-group input:focus { border-color: var(--accent); }
+
+  .ratio-select {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .ratio-btn {
+    flex: 1;
+    min-width: 60px;
+    padding: 0.5em;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: all 0.2s;
+  }
+  .ratio-btn:hover { border-color: var(--accent); color: var(--text); }
+  .ratio-btn.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(88,166,255,0.1);
+  }
+
+  #start-btn {
+    width: 100%;
+    padding: 0.9em;
+    border: none;
+    border-radius: 10px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 1.1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.2s;
+  }
+  #start-btn:hover { opacity: 0.88; }
+
+  /* ── TEST SCREEN ─────────────────────────────────────────────────────── */
+  #test-screen { padding-top: 1rem; }
+  
+  /* Progress stages */
+  .stages-container {
+    width: min(700px, 95vw);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1rem 1.2rem;
+  }
+  .stages-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.8rem;
+  }
+  .stages-title {
+    font-size: 0.8rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .stages-progress {
+    font-size: 0.85rem;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .stages-grid {
+    display: grid;
+    grid-template-columns: repeat(10, 1fr);
+    gap: 4px;
+  }
+  .stage-dot {
+    height: 8px;
+    border-radius: 4px;
+    background: var(--border);
+    transition: all 0.3s;
+  }
+  .stage-dot.current {
+    background: var(--yellow);
+    box-shadow: 0 0 6px var(--yellow);
+  }
+  .stage-dot.completed {
+    background: var(--green);
+  }
+
+  /* Current info bar */
+  .info-bar {
+    display: flex;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+  }
+  .info-item {
+    text-align: center;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.8rem 1.2rem;
+    min-width: 100px;
+  }
+  .info-item .label {
+    font-size: 0.7rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 0.3rem;
+  }
+  .info-item .value {
+    font-size: 1.6rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .info-item .unit {
+    font-size: 0.75rem;
+    color: var(--muted);
+  }
+  #freq-value { color: var(--accent); }
+  #cycle-value { color: var(--yellow); }
+  #bpm-value { color: var(--red); }
+  #lf-value { color: var(--green); }
+
+  /* Cycle counter */
+  .cycle-indicator {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+  }
+  .cycle-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--border);
+    transition: all 0.3s;
+  }
+  .cycle-dot.active {
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+    transform: scale(1.2);
+  }
+  .cycle-dot.completed {
+    background: var(--green);
+  }
+
+  /* Breathing circle */
+  .circle-wrap {
+    position: relative;
+    width: var(--circle-size);
+    height: var(--circle-size);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .ring {
+    position: absolute; inset: 0;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+    opacity: 0.25;
+    transition: color 0.6s ease;
+  }
+  #breath-circle {
+    width: 55%; height: 55%;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, var(--circle-color, var(--inhale-color)), #1a2433);
+    box-shadow: 0 0 40px 6px var(--circle-color, var(--inhale-color));
+    transition: background 0.6s ease, box-shadow 0.6s ease;
+    will-change: transform;
+  }
+  @keyframes idle-pulse {
+    0%, 100% { transform: scale(1);    opacity: 0.5; }
+    50%       { transform: scale(1.08); opacity: 0.8; }
+  }
+  #phase-text {
+    position: absolute;
+    font-size: 1.1rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    transition: color 0.4s ease;
+    pointer-events: none;
+    user-select: none;
+  }
+  .arc-svg {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    transform: rotate(-90deg);
+  }
+  #arc-track { fill: none; stroke: var(--border); stroke-width: 3; }
+  #arc-fill  { fill: none; stroke-width: 3; stroke-linecap: round; transition: stroke 0.6s ease; }
+
+  /* Stop button */
+  #stop-btn {
+    padding: 0.6em 2em;
+    border-radius: 8px;
+    border: 1px solid var(--red);
+    background: rgba(248,81,73,0.1);
+    color: var(--red);
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  #stop-btn:hover { background: rgba(248,81,73,0.2); }
+
+  /* ── RESULTS SCREEN ──────────────────────────────────────────────────── */
+  .results-container {
+    width: min(700px, 95vw);
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+  .result-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+  }
+  .result-card h2 {
+    font-size: 1.1rem;
+    color: var(--accent);
+    margin-bottom: 1rem;
+    text-align: center;
+  }
+  .best-result {
+    background: linear-gradient(135deg, rgba(88,166,255,0.1) 0%, rgba(63,185,80,0.1) 100%);
+    border-color: var(--accent);
+  }
+  .best-value {
+    text-align: center;
+    margin: 1rem 0;
+  }
+  .best-value .number {
+    font-size: 3rem;
+    font-weight: 700;
+    color: var(--green);
+    font-variant-numeric: tabular-nums;
+  }
+  .best-value .label {
+    font-size: 0.9rem;
+    color: var(--muted);
+  }
+
+  /* Results table */
+  .results-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+  }
+  .results-table th {
+    color: var(--muted);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.6em 0.5em;
+    border-bottom: 1px solid var(--border);
+    text-align: center;
+  }
+  .results-table td {
+    padding: 0.6em 0.5em;
+    border-bottom: 1px solid var(--border);
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .results-table tr.best {
+    background: rgba(88,166,255,0.1);
+  }
+  .results-table tr.best td {
+    color: var(--green);
+    font-weight: 600;
+  }
+  .results-table tr.current {
+    background: rgba(217,153,34,0.1);
+  }
+
+  .action-btns {
+    display: flex;
+    gap: 0.8rem;
+    justify-content: center;
+  }
+  .action-btns button {
+    padding: 0.65em 1.5em;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 0.95rem;
+    cursor: pointer;
+  }
+  .action-btns button:hover { border-color: var(--accent); color: var(--accent); }
+  .action-btns .primary-btn {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+  .action-btns .primary-btn:hover { opacity: 0.85; color: #fff; }
+
+  /* Save status */
+  #save-status {
+    text-align: center;
+    font-size: 0.85rem;
+    color: var(--muted);
+    min-height: 1.2em;
+  }
+
+  /* ── Footer ──────────────────────────────────────────────────────────── */
+  footer {
+    text-align: center;
+    padding: 0.8rem;
+    font-size: 0.72rem;
+    color: var(--muted);
+    border-top: 1px solid var(--border);
+  }
+
+  /* Responsive */
+  @media (max-width: 600px) {
+    .freq-grid { grid-template-columns: repeat(5, 1fr); }
+    .stages-grid { grid-template-columns: repeat(5, 1fr); }
+    .info-bar { gap: 0.8rem; }
+    .info-item { padding: 0.6rem 0.8rem; min-width: 80px; }
+    .info-item .value { font-size: 1.3rem; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f85149" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+  </svg>
+  <h1>CDI 共振呼吸测试</h1>
+  <span class="subtitle">Personalized Resonance Frequency (PRBF)</span>
+  <div class="header-right">
+    <span id="user-label"></span>
+    <button id="ble-btn" class="pill">连接传感器 (BLE)</button>
+    <button id="relay-connect-btn" class="pill">连接心电带</button>
+    <button id="relay-stop-btn" class="pill" style="display:none">断开</button>
+    <span id="conn-pill" class="pill pill-waiting">等待中…</span>
+  </div>
+</header>
+
+<main>
+<!-- ═══════════════════ START SCREEN ═══════════════════ -->
+<div id="start-screen" class="screen active">
+  <div class="intro-card">
+    <h2>个性化共振频率测试</h2>
+    <p class="desc">
+      本测试将帮助您找到最佳的共振呼吸频率。系统会引导您在不同频率下呼吸，
+      并通过心率变异性（HRV）分析确定产生最高LF功率的频率。
+    </p>
+    
+    <div class="protocol">
+      <h3>测试流程</h3>
+      <div class="freq-grid">
+        <div class="freq-item">8.0</div>
+        <div class="freq-item">8.25</div>
+        <div class="freq-item">8.5</div>
+        <div class="freq-item">8.75</div>
+        <div class="freq-item">9.0</div>
+        <div class="freq-item">9.25</div>
+        <div class="freq-item">9.5</div>
+        <div class="freq-item">9.75</div>
+        <div class="freq-item">10.0</div>
+        <div class="freq-item">10.25</div>
+      </div>
+      <p class="protocol-note">共10个频率档位，每档3个呼吸周期</p>
+    </div>
+
+    <div class="form-group">
+      <label>吸呼比例</label>
+      <div class="ratio-select">
+        <button type="button" class="ratio-btn" data-inhale="4" data-exhale="6">4:6</button>
+        <button type="button" class="ratio-btn active" data-inhale="5" data-exhale="5">5:5</button>
+        <button type="button" class="ratio-btn" data-inhale="6" data-exhale="4">6:4</button>
+      </div>
+    </div>
+
+    <button id="start-btn">开始测试</button>
+  </div>
+</div>
+
+<!-- ═══════════════════ TEST SCREEN ═══════════════════ -->
+<div id="test-screen" class="screen">
+  <!-- Progress stages -->
+  <div class="stages-container">
+    <div class="stages-header">
+      <span class="stages-title">测试进度</span>
+      <span class="stages-progress" id="stage-progress">第 1/10 档</span>
+    </div>
+    <div class="stages-grid" id="stages-grid">
+      <!-- Generated by JS -->
+    </div>
+  </div>
+
+  <!-- Current info -->
+  <div class="info-bar">
+    <div class="info-item">
+      <div class="label">当前频率</div>
+      <div class="value" id="freq-value">--</div>
+      <div class="unit">bpm</div>
+    </div>
+    <div class="info-item">
+      <div class="label">呼吸周期</div>
+      <div class="value" id="cycle-value">--</div>
+      <div class="unit">秒</div>
+    </div>
+    <div class="info-item">
+      <div class="label">周期进度</div>
+      <div class="value" style="display:flex;align-items:center;justify-content:center;height:1.6rem">
+        <div class="cycle-indicator" id="cycle-indicator">
+          <div class="cycle-dot"></div>
+          <div class="cycle-dot"></div>
+          <div class="cycle-dot"></div>
+        </div>
+      </div>
+      <div class="unit" id="cycle-text">第 1/3 周期</div>
+    </div>
+  </div>
+
+  <div class="info-bar">
+    <div class="info-item">
+      <div class="label">实时心率</div>
+      <div class="value" id="bpm-value">--</div>
+      <div class="unit">BPM</div>
+    </div>
+    <div class="info-item">
+      <div class="label">HRV RMSSD</div>
+      <div class="value" id="rmssd-value">--</div>
+      <div class="unit">ms</div>
+    </div>
+    <div class="info-item">
+      <div class="label">LF Power</div>
+      <div class="value" id="lf-value">--</div>
+      <div class="unit">ms²</div>
+    </div>
+  </div>
+
+  <!-- Breathing circle -->
+  <div class="circle-wrap">
+    <div class="ring" id="ring-el"></div>
+    <svg class="arc-svg" viewBox="0 0 100 100">
+      <circle id="arc-track" cx="50" cy="50" r="47"/>
+      <circle id="arc-fill"  cx="50" cy="50" r="47" stroke-dasharray="295.3" stroke-dashoffset="295.3"/>
+    </svg>
+    <div id="breath-circle"></div>
+    <span id="phase-text">–</span>
+  </div>
+
+  <button id="stop-btn">停止测试</button>
+</div>
+
+<!-- ═══════════════════ RESULTS SCREEN ═══════════════════ -->
+<div id="results-screen" class="screen">
+  <div class="results-container">
+    <!-- Best result -->
+    <div class="result-card best-result">
+      <h2>🎯 您的个性化共振频率</h2>
+      <div class="best-value">
+        <div class="number" id="best-freq">--</div>
+        <div class="label">breaths/min (bpm)</div>
+      </div>
+      <div class="best-value" style="margin-top:0.5rem">
+        <div class="number" id="best-cycle" style="font-size:1.8rem;color:var(--accent)">--</div>
+        <div class="label">推荐呼吸周期</div>
+      </div>
+    </div>
+
+    <!-- All results table -->
+    <div class="result-card">
+      <h2>测试数据汇总</h2>
+      <table class="results-table">
+        <thead>
+          <tr>
+            <th>档位</th>
+            <th>频率 (bpm)</th>
+            <th>周期 (s)</th>
+            <th>LF Power</th>
+            <th>RMSSD</th>
+            <th>BPM</th>
+          </tr>
+        </thead>
+        <tbody id="results-body">
+          <!-- Generated by JS -->
+        </tbody>
+      </table>
+    </div>
+
+    <div class="action-btns">
+      <button class="primary-btn" id="save-btn">保存结果</button>
+      <button id="restart-btn">重新测试</button>
+    </div>
+    <div id="save-status"></div>
+  </div>
+</div>
+</main>
+
+<footer>
+  CDI 共振呼吸测试 · 请使用心率传感器获取准确数据
+</footer>
+
+<script src="{{ url_for('static', filename='js/browser_ble_heart_relay.js') }}"></script>
+<script>
+// ══════════════════════════════════════════════════════════════════════════
+// Constants & Config
+// ══════════════════════════════════════════════════════════════════════════
+const CDI_FREQUENCIES = [8.0, 8.25, 8.5, 8.75, 9.0, 9.25, 9.5, 9.75, 10.0, 10.25];
+const CYCLES_PER_FREQ = 3;
+const CIRC = 2 * Math.PI * 47;
+
+const COLORS = {
+  inhale: getComputedStyle(document.documentElement).getPropertyValue('--inhale-color').trim(),
+  exhale: getComputedStyle(document.documentElement).getPropertyValue('--exhale-color').trim(),
+};
+
+// ══════════════════════════════════════════════════════════════════════════
+// URL Params
+// ═══════════════════════════════════════════════════════════════════════════
+const urlParams = new URLSearchParams(window.location.search);
+const USERNAME = (urlParams.get('user') || urlParams.get('username') || '').trim();
+const SESSION_ID = USERNAME || 'cdi_default';
+
+// Display username in header
+const userLabel = document.getElementById('user-label');
+if (USERNAME) {
+  userLabel.textContent = USERNAME;
+  userLabel.style.display = '';
+} else {
+  userLabel.style.display = 'none';
+}
+
+function api(path) {
+  const sep = path.includes('?') ? '&' : '?';
+  return `${path}${sep}id=${encodeURIComponent(SESSION_ID)}`;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// State
+// ══════════════════════════════════════════════════════════════════════════
+let testState = {
+  currentStage: 0,
+  currentCycle: 0,
+  isRunning: false,
+  breathCycle: { inhale: 3.75, exhale: 3.75, total: 7.5 },
+};
+
+let inhaleRatio = 5;
+let exhaleRatio = 5;
+
+// Animation state
+let animFrame = null;
+let phaseStart = null;
+let currentPhase = 'inhale';
+
+// ══════════════════════════════════════════════════════════════════════════
+// Elements
+// ══════════════════════════════════════════════════════════════════════════
+const screens = {
+  start: document.getElementById('start-screen'),
+  test: document.getElementById('test-screen'),
+  results: document.getElementById('results-screen'),
+};
+
+const connPill = document.getElementById('conn-pill');
+const freqValue = document.getElementById('freq-value');
+const cycleValue = document.getElementById('cycle-value');
+const bpmValue = document.getElementById('bpm-value');
+const rmssdValue = document.getElementById('rmssd-value');
+const lfValue = document.getElementById('lf-value');
+const phaseText = document.getElementById('phase-text');
+const breathCircle = document.getElementById('breath-circle');
+const ringEl = document.getElementById('ring-el');
+const arcFill = document.getElementById('arc-fill');
+const stagesGrid = document.getElementById('stages-grid');
+const cycleIndicator = document.getElementById('cycle-indicator');
+const stageProgress = document.getElementById('stage-progress');
+const cycleText = document.getElementById('cycle-text');
+const saveStatus = document.getElementById('save-status');
+
+// ══════════════════════════════════════════════════════════════════════════
+// Helpers
+// ══════════════════════════════════════════════════════════════════════════
+function lerp(a, b, t) { return a + (b - a) * t; }
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(v, hi)); }
+function easeInOut(t) { return t < 0.5 ? 2*t*t : -1 + (4 - 2*t)*t; }
+
+function showScreen(name) {
+  Object.values(screens).forEach(s => s.classList.remove('active'));
+  screens[name].classList.add('active');
+}
+
+function freqToCycle(freq) {
+  return Math.round((60 / freq) * 100) / 100;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// UI Initialization
+// ═══════════════════════════════════════════════════════════════════════════
+// Generate stage dots
+function initStageGrid() {
+  stagesGrid.innerHTML = '';
+  CDI_FREQUENCIES.forEach((freq, i) => {
+    const dot = document.createElement('div');
+    dot.className = 'stage-dot';
+    dot.dataset.stage = i;
+    dot.title = `${freq} bpm`;
+    stagesGrid.appendChild(dot);
+  });
+}
+
+// Update stage indicators
+function updateStageIndicators() {
+  const dots = stagesGrid.querySelectorAll('.stage-dot');
+  dots.forEach((dot, i) => {
+    dot.classList.remove('current', 'completed');
+    if (i < testState.currentStage) {
+      dot.classList.add('completed');
+    } else if (i === testState.currentStage) {
+      dot.classList.add('current');
+    }
+  });
+  stageProgress.textContent = `第 ${testState.currentStage + 1}/${CDI_FREQUENCIES.length} 档`;
+}
+
+// Update cycle indicators
+function updateCycleIndicators() {
+  const dots = cycleIndicator.querySelectorAll('.cycle-dot');
+  dots.forEach((dot, i) => {
+    dot.classList.remove('active', 'completed');
+    if (i < testState.currentCycle) {
+      dot.classList.add('completed');
+    } else if (i === testState.currentCycle) {
+      dot.classList.add('active');
+    }
+  });
+  cycleText.textContent = `第 ${testState.currentCycle + 1}/${CYCLES_PER_FREQ} 周期`;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Breathing Animation
+// ═══════════════════════════════════════════════════════════════════════════
+const SCALE = { inhale: 1.42, exhale: 0.72 };
+
+function applyPhaseColor(phase) {
+  const c = COLORS[phase];
+  breathCircle.style.setProperty('--circle-color', c);
+  breathCircle.style.background = `radial-gradient(circle at 35% 35%, ${c}, #1a2433)`;
+  breathCircle.style.boxShadow = `0 0 40px 6px ${c}`;
+  ringEl.style.color = c;
+  arcFill.style.stroke = c;
+  phaseText.style.color = c;
+  phaseText.textContent = phase === 'inhale' ? '吸气' : '呼气';
+}
+
+function startPhase(phase, ts) {
+  currentPhase = phase;
+  phaseStart = ts;
+  applyPhaseColor(phase);
+}
+
+function animate(ts) {
+  animFrame = requestAnimationFrame(animate);
+  
+  const elapsed = ts - phaseStart;
+  const duration = testState.breathCycle[currentPhase] * 1000;
+  const progress = clamp(elapsed / duration, 0, 1);
+  
+  // Arc progress
+  const phaseOffset = currentPhase === 'inhale' ? 0 : testState.breathCycle.inhale * 1000;
+  const cycleProgress = clamp((phaseOffset + elapsed) / (testState.breathCycle.total * 1000), 0, 1);
+  arcFill.style.strokeDashoffset = CIRC * (1 - cycleProgress);
+  
+  // Circle scale
+  const scale = currentPhase === 'inhale'
+    ? lerp(SCALE.exhale, SCALE.inhale, easeInOut(progress))
+    : lerp(SCALE.inhale, SCALE.exhale, easeInOut(progress));
+  breathCircle.style.transform = `scale(${scale.toFixed(3)})`;
+  
+  // Phase complete
+  if (progress >= 1) {
+    const next = currentPhase === 'inhale' ? 'exhale' : 'inhale';
+    if (next === 'inhale') {
+      // Full cycle complete
+      onCycleComplete();
+    }
+    startPhase(next, ts);
+  }
+}
+
+function startBreathing() {
+  if (animFrame) cancelAnimationFrame(animFrame);
+  const freq = CDI_FREQUENCIES[testState.currentStage];
+  const cycle = freqToCycle(freq);
+  const totalRatio = inhaleRatio + exhaleRatio;
+  const inhale = cycle * inhaleRatio / totalRatio;
+  const exhale = cycle * exhaleRatio / totalRatio;
+  
+  testState.breathCycle = { inhale, exhale, total: cycle };
+  freqValue.textContent = freq.toFixed(2);
+  cycleValue.textContent = cycle.toFixed(2);
+  
+  requestAnimationFrame(ts => {
+    startPhase('inhale', ts);
+    animFrame = requestAnimationFrame(animate);
+  });
+}
+
+function stopBreathing() {
+  if (animFrame) {
+    cancelAnimationFrame(animFrame);
+    animFrame = null;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Test Logic
+// ═══════════════════════════════════════════════════════════════════════════
+async function onCycleComplete() {
+  // Notify server
+  try {
+    const resp = await fetch(api('/api/cdi-prbf/on-cycle-complete'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const data = await resp.json();
+    
+    if (data.test_complete) {
+      stopBreathing();
+      showResults();
+      return;
+    }
+    
+    if (data.stage_complete) {
+      // New stage
+      testState.currentStage = data.new_stage - 1; // Convert to 0-indexed
+      testState.currentCycle = 0;
+    } else {
+      // Same stage, next cycle
+      testState.currentCycle = data.current_cycle - 1; // Convert to 0-indexed
+    }
+    
+    updateStageIndicators();
+    updateCycleIndicators();
+    
+  } catch (e) {
+    console.error('Cycle complete error:', e);
+  }
+}
+
+async function startTest() {
+  // Configure
+  await fetch(api('/api/cdi-prbf/configure'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      cycles_per_frequency: CYCLES_PER_FREQ,
+      inhale_ratio: inhaleRatio,
+      exhale_ratio: exhaleRatio,
+      username: USERNAME,
+    })
+  });
+  
+  // Start
+  await fetch(api('/api/cdi-prbf/start'), { method: 'POST' });
+  
+  testState.currentStage = 0;
+  testState.currentCycle = 0;
+  testState.isRunning = true;
+  
+  updateStageIndicators();
+  updateCycleIndicators();
+  showScreen('test');
+  startBreathing();
+}
+
+async function stopTest() {
+  if (!confirm('确定要停止测试吗？当前进度将丢失。')) return;
+  
+  stopBreathing();
+  await fetch(api('/api/cdi-prbf/stop'), { method: 'POST' });
+  await fetch(api('/api/cdi-prbf/reset'), { method: 'POST' });
+  
+  testState.isRunning = false;
+  showScreen('start');
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Results
+// ══════════════════════════════════════════════════════════════════════════
+async function showResults() {
+  try {
+    const resp = await fetch(api('/api/cdi-prbf/results'));
+    const data = await resp.json();
+    
+    const results = data.stage_results || [];
+    const best = data.best_result;
+    
+    // Update best result
+    if (best) {
+      document.getElementById('best-freq').textContent = best.frequency.toFixed(2);
+      document.getElementById('best-cycle').textContent = best.cycle.toFixed(2) + ' s';
+    }
+    
+    // Build table
+    const tbody = document.getElementById('results-body');
+    tbody.innerHTML = '';
+    
+    results.forEach((r, i) => {
+      const isBest = best && r.frequency === best.frequency;
+      const tr = document.createElement('tr');
+      if (isBest) tr.classList.add('best');
+      tr.innerHTML = `
+        <td>${r.stage}</td>
+        <td>${r.frequency.toFixed(2)}</td>
+        <td>${r.cycle.toFixed(2)}</td>
+        <td>${r.lf_avg != null ? r.lf_avg.toFixed(3) : '--'}</td>
+        <td>${r.rmssd_avg != null ? r.rmssd_avg.toFixed(1) : '--'}</td>
+        <td>${r.bpm_avg != null ? r.bpm_avg.toFixed(1) : '--'}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+    
+    showScreen('results');
+  } catch (e) {
+    console.error('Show results error:', e);
+  }
+}
+
+async function saveResults() {
+  const btn = document.getElementById('save-btn');
+  btn.disabled = true;
+  saveStatus.textContent = '保存中…';
+  
+  try {
+    const resp = await fetch(api('/api/cdi-prbf/save'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: USERNAME })
+    });
+    const data = await resp.json();
+    
+    if (data.ok) {
+      saveStatus.textContent = `已保存: ${data.file}`;
+      saveStatus.style.color = 'var(--green)';
+    } else {
+      throw new Error(data.error || '保存失败');
+    }
+  } catch (e) {
+    saveStatus.textContent = '保存失败: ' + e.message;
+    saveStatus.style.color = 'var(--red)';
+  }
+  
+  btn.disabled = false;
+}
+
+async function restartTest() {
+  await fetch(api('/api/cdi-prbf/reset'), { method: 'POST' });
+  saveStatus.textContent = '';
+  showScreen('start');
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// SSE - Live Metrics
+// ═══════════════════════════════════════════════════════════════════════════
+let sseRetryDelay = 2000;
+
+function connectSSE() {
+  const es = new EventSource(api('/api/stream'));
+  
+  es.onopen = () => {
+    sseRetryDelay = 2000;
+    connPill.className = 'pill pill-waiting';
+    connPill.textContent = '已连接 – 等待数据…';
+  };
+  
+  es.onmessage = (ev) => {
+    const data = JSON.parse(ev.data);
+    const { bpm, hrv_rmssd, lf_power } = data;
+    
+    if (bpm > 0) {
+      bpmValue.textContent = bpm.toFixed(1);
+      connPill.className = 'pill pill-connected';
+      connPill.textContent = 'Live ♥';
+    }
+    if (hrv_rmssd != null) {
+      rmssdValue.textContent = hrv_rmssd.toFixed(1);
+    }
+    if (lf_power != null) {
+      lfValue.textContent = lf_power.toFixed(3);
+    }
+  };
+  
+  es.onerror = () => {
+    es.close();
+    connPill.className = 'pill pill-disconnected';
+    connPill.textContent = '断开 – 重连中…';
+    setTimeout(connectSSE, sseRetryDelay);
+    sseRetryDelay = Math.min(sseRetryDelay * 1.5, 15000);
+  };
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Event Listeners
+// ═══════════════════════════════════════════════════════════════════════════
+document.getElementById('start-btn').addEventListener('click', () => {
+  void startTest();
+});
+
+document.getElementById('stop-btn').addEventListener('click', () => {
+  void stopTest();
+});
+
+document.getElementById('save-btn').addEventListener('click', () => {
+  void saveResults();
+});
+
+document.getElementById('restart-btn').addEventListener('click', () => {
+  void restartTest();
+});
+
+// Ratio buttons
+document.querySelectorAll('.ratio-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.ratio-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    inhaleRatio = parseInt(btn.dataset.inhale);
+    exhaleRatio = parseInt(btn.dataset.exhale);
+  });
+});
+
+// BLE relay buttons
+document.getElementById('relay-connect-btn').addEventListener('click', async () => {
+  if (!window.BrowserBleHeartRelay) {
+    alert('浏览器BLE功能未加载');
+    return;
+  }
+  try {
+    const config = {
+      deviceNamePrefix: 'Farbeat',
+      pulseUrl: api('/api/pulse'),
+    };
+    const relay = new window.BrowserBleHeartRelay(config);
+    await relay.connect();
+    document.getElementById('relay-connect-btn').style.display = 'none';
+    document.getElementById('relay-stop-btn').style.display = '';
+  } catch (e) {
+    alert('连接失败: ' + e.message);
+  }
+});
+
+document.getElementById('relay-stop-btn').addEventListener('click', () => {
+  document.getElementById('relay-connect-btn').style.display = '';
+  document.getElementById('relay-stop-btn').style.display = 'none';
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// Init
+// ═══════════════════════════════════════════════════════════════════════════
+initStageGrid();
+connectSSE();
+</script>
+</body>
+</html>

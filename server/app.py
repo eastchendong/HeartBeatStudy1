@@ -25,6 +25,7 @@ from routes.relay import relay_bp
 from routes.buteyko import buteyko_bp
 from routes.auth import auth_bp
 from routes.admin_api import admin_api_bp
+from routes.cdi_prbf import cdi_prbf_bp
 
 app = Flask(__name__)
 
@@ -41,6 +42,7 @@ app.register_blueprint(relay_bp)
 app.register_blueprint(buteyko_bp)
 app.register_blueprint(auth_bp)
 app.register_blueprint(admin_api_bp)
+app.register_blueprint(cdi_prbf_bp)
 
 
 @app.route("/")

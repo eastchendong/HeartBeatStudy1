@@ -50,12 +50,8 @@ def reset_session():
     return jsonify({"ok": True})
 
 
-@results_bp.route("/api/save_session", methods=["POST"])
-def save_session():
-    sess = get_current_session()
-    body = request.get_json(silent=True) or {}
-    username = body.get("username", "").strip()
-
+def _save_session_to_file(sess: state.SessionState, username: str = "", training_type: str = "resonance", extra_data: dict = None):
+    """Helper to save session data to file. Used by main save and CDI PRBF save."""
     with sess.lock:
         if not username:
             username = sess.session_config.get("username", "")
@@ -77,6 +73,7 @@ def save_session():
         "session_id":       sess.session_id,
         "timestamp":        datetime.now(timezone.utc).isoformat(),
         "username":         username or "anonymous",
+        "training_type":    training_type,
         "config":           config_snap,
         "rr_intervals_ms":  rr_data,
         "rr_count":         len(rr_data),
@@ -87,6 +84,10 @@ def save_session():
         "hrv_rmssd":        round(final_rmssd, 2) if final_rmssd is not None else None,
         "lf_power":         round(final_lf, 4) if final_lf is not None else None,
     }
+    
+    # Add any extra data
+    if extra_data:
+        session_record.update(extra_data)
 
     filename = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{session_record['id'][:8]}.json"
     filepath = state.DATA_DIR / filename
@@ -99,7 +100,7 @@ def save_session():
         shutil.copy2(filepath, shared_file)
         mirrored_to = str(shared_file)
 
-    return jsonify({
+    return {
         "ok":   True,
         "file": str(filepath.name),
         "mirrored_to": mirrored_to,
@@ -111,7 +112,17 @@ def save_session():
             "lf_power":  session_record["lf_power"],
             "rr_count":  session_record["rr_count"],
         },
-    })
+    }
+
+
+@results_bp.route("/api/save_session", methods=["POST"])
+def save_session():
+    sess = get_current_session()
+    body = request.get_json(silent=True) or {}
+    username = body.get("username", "").strip()
+    
+    result = _save_session_to_file(sess, username=username, training_type="resonance")
+    return jsonify(result)
 
 
 @results_bp.route("/api/sessions")
