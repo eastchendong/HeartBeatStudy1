@@ -59,6 +59,10 @@ class SessionState:
         self.rr_intervals: List[float] = []      # all RR intervals in ms
         self.rr_timestamps: List[float] = []     # server receive time for each RR
         self.bpm_all: List[float] = []           # all BPM readings for max/min
+        
+        # ── Per-cycle RR intervals (for CDI PRBF) ─────────────────────────────
+        self.current_cycle_rr: List[float] = []  # RR intervals for current cycle
+        self.cycle_rr_list: List[List[float]] = []  # RR intervals per completed cycle
 
         # ── Session timer state ────────────────────────────────────────────────
         self.session_start: float  = time.time()

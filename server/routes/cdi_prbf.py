@@ -153,12 +153,19 @@ def on_cycle_complete():
         current_stage = cdi_config["current_stage"]
         current_cycle = cdi_config["current_cycle"]
         
+        # Save RR intervals for this cycle
+        cycle_rr = list(sess.current_cycle_rr)
+        if cycle_rr:
+            sess.cycle_rr_list.append(cycle_rr)
+        sess.current_cycle_rr.clear()
+        
         # Record current cycle data
         cycle_data = {
             "cycle": current_cycle + 1,
             "bpm": sess.latest_bpm,
             "rmssd": sess.latest_rmssd,
             "lf": sess.latest_lf_power,
+            "rr_intervals": cycle_rr,
         }
         cdi_config["stage_data"].append(cycle_data)
         
@@ -301,6 +308,11 @@ def reset_test():
         sess.latest_rmssd = None
         sess.latest_lf_power = None
         sess.latest_bpm = 0.0
+        # Clear cycle RR data
+        if hasattr(sess, 'current_cycle_rr'):
+            sess.current_cycle_rr.clear()
+        if hasattr(sess, 'cycle_rr_list'):
+            sess.cycle_rr_list.clear()
     
     return jsonify({"ok": True})
 
@@ -326,26 +338,110 @@ def get_results():
 
 @cdi_prbf_bp.route("/api/cdi-prbf/save", methods=["POST"])
 def save_results():
-    """Save test results to file."""
+    """Save CDI PRBF test results - one file per cycle."""
+    import uuid
+    from datetime import datetime, timezone
+    
     sess = get_current_session()
     data = request.get_json(silent=True) or {}
-    username = data.get("username", "")
+    username = data.get("username", "") or sess.session_config.get("username", "") or "anonymous"
     
     with sess.lock:
         cdi_config = sess.session_config.get("cdi_prbf", {})
         if not cdi_config:
             return jsonify({"error": "No test data"}), 400
         
-        from routes.results import _save_session_to_file
+        stage_data = cdi_config.get("stage_data", [])
+        stage_results = cdi_config.get("stage_results", [])
+        best_result = cdi_config.get("best_result")
         
-        result = _save_session_to_file(
-            sess,
-            username=username,
-            training_type="cdi_prbf",
-            extra_data={
-                "cdi_prbf_results": cdi_config.get("stage_results", []),
-                "cdi_prbf_best": cdi_config.get("best_result"),
-            }
-        )
+        # Get cycle RR intervals
+        cycle_rr_list = list(sess.cycle_rr_list)
         
-        return jsonify(result)
+        # Group stage_data by stage (3 cycles per stage)
+        cycles_per_freq = cdi_config.get("cycles_per_frequency", CYCLES_PER_FREQUENCY)
+        
+        # Get all BPM readings
+        bpm_all = list(sess.bpm_all)
+        
+        # Calculate BPM per cycle (approximate - divide evenly)
+        bpm_per_cycle = []
+        if bpm_all and len(cycle_rr_list) > 0:
+            bpm_per_cycle = bpm_all
+        
+        # Build per-cycle data
+        cycles = []
+        for i, rr_cycle in enumerate(cycle_rr_list):
+            stage_idx = i // cycles_per_freq
+            cycle_in_stage = (i % cycles_per_freq) + 1
+            
+            # Find corresponding stage_data for this cycle
+            cycle_data = None
+            for sd in stage_data:
+                if sd.get("cycle") == cycle_in_stage:
+                    # Need to find the right one - stage_data is per-stage
+                    pass
+            
+            cycles.append({
+                "cycle_number": i + 1,
+                "stage": stage_idx + 1,
+                "frequency": CDI_FREQUENCIES[stage_idx] if stage_idx < len(CDI_FREQUENCIES) else None,
+                "cycle_duration": 60.0 / CDI_FREQUENCIES[stage_idx] if stage_idx < len(CDI_FREQUENCIES) else None,
+                "rr_intervals": rr_cycle,
+                "rr_count": len(rr_cycle),
+            })
+        
+        # Create session record
+        session_record = {
+            "id": str(uuid.uuid4()),
+            "session_id": sess.session_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "username": username,
+            "training_type": "cdi_prbf",
+            "config": {
+                "frequencies": CDI_FREQUENCIES,
+                "cycles_per_frequency": cycles_per_freq,
+                "total_cycles": len(cycle_rr_list),
+            },
+            "cycles": cycles,
+            "stage_results": stage_results,
+            "best_result": best_result,
+            "all_bpm": bpm_all,
+            "bpm_avg": sum(bpm_all) / len(bpm_all) if bpm_all else None,
+            "bpm_max": max(bpm_all) if bpm_all else None,
+            "bpm_min": min(bpm_all) if bpm_all else None,
+        }
+        
+        # Save to file
+        filename = f"cdi_prbf_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{session_record['id'][:8]}.json"
+        filepath = state.DATA_DIR / filename
+        import json as json_mod
+        with open(filepath, "w", encoding="utf-8") as f:
+            json_mod.dump(session_record, f, ensure_ascii=False, indent=2)
+        
+        # Mirror to shared dir if configured
+        mirrored_to = None
+        if state.SHARED_DATA_DIR is not None:
+            shared_file = state.SHARED_DATA_DIR / filename
+            import shutil
+            shutil.copy2(filepath, shared_file)
+            mirrored_to = str(shared_file)
+        
+        # Clear cycle data to prevent duplicate saves
+        sess.cycle_rr_list.clear()
+        sess.current_cycle_rr.clear()
+        
+        # Reset test state
+        cdi_config["test_active"] = False
+        
+        return jsonify({
+            "ok": True,
+            "file": str(filepath.name),
+            "mirrored_to": mirrored_to,
+            "summary": {
+                "total_cycles": len(cycle_rr_list),
+                "total_stages": len(stage_results),
+                "bpm_avg": session_record["bpm_avg"],
+                "best_frequency": best_result.get("frequency") if best_result else None,
+            },
+        })

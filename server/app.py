@@ -15,8 +15,14 @@ Blueprints
 """
 
 import os
+from pathlib import Path
+from dotenv import load_dotenv
 from flask import Flask, render_template
 from flask_cors import CORS
+
+# Load .env file from project root
+env_path = Path(__file__).parent.parent / ".env"
+load_dotenv(env_path)
 
 from routes.setup import setup_bp
 from routes.training import training_bp

@@ -120,6 +120,9 @@ def receive_pulse():
             if 200 < rr_val < 2000:
                 sess.rr_intervals.append(rr_val)
                 sess.rr_timestamps.append(now)
+                # Also track for per-cycle RR (CDI PRBF)
+                if hasattr(sess, 'current_cycle_rr'):
+                    sess.current_cycle_rr.append(rr_val)
 
         recent_rr = sess.rr_intervals[-120:] if len(sess.rr_intervals) > 120 else list(sess.rr_intervals)
         computed_rmssd = compute_rmssd(recent_rr)
