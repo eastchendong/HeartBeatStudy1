@@ -993,14 +993,8 @@ function renderAnalysis(sessionData) {
   
   html += '</div>';
   
-  // Add PRBF metrics comparison table if any session has PRBF-like data
-  const hasPrbfData = sessionData.some(item => {
-    const config = item.data.config || {};
-    const breathCycle = config.breath_cycle || 10;
-    return breathCycle >= 9 && breathCycle <= 14; // 4.5-6.5 bpm = 9-13s cycle
-  });
-  
-  if (hasPrbfData && sessionData.length > 1) {
+  // Always show stats comparison table when multiple sessions are selected
+  if (sessionData.length > 1) {
     html += buildPrbfMetricsTable(sessionData);
   }
   
@@ -1152,7 +1146,7 @@ function buildPrbfMetricsTable(sessionData) {
   
   let html = `
     <div class="metrics-section">
-      <h4>PRBF 测试指标对比 (4.5-6.5 次/min 范围)</h4>
+      <h4>会话数据统计对比</h4>
       <table class="metrics-table">
         <thead>
           <tr>

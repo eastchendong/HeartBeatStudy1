@@ -8,6 +8,7 @@ session start / pause / play, and the breathing-cycle adaptive logic.
 import json
 import queue
 import time
+from typing import Optional
 
 from flask import Blueprint, Response, jsonify, request
 
@@ -33,7 +34,7 @@ def _is_adaptive(sess: SessionState) -> bool:
     return bool(sess.session_config["adaptive"])
 
 
-def _compute_cycle(sess: SessionState, rmssd: float | None) -> float:
+def _compute_cycle(sess: SessionState, rmssd: Optional[float]) -> float:
     base = _get_base_cycle(sess)
     if not _is_adaptive(sess):
         return base
@@ -51,7 +52,7 @@ def _elapsed_seconds(sess: SessionState) -> float:
     return sess.elapsed_before_pause + (time.time() - sess.session_start)
 
 
-def _make_payload(sess: SessionState, bpm: float, rmssd: float | None, cycle: float) -> dict:
+def _make_payload(sess: SessionState, bpm: float, rmssd: Optional[float], cycle: float) -> dict:
     session_dur = _get_session_duration(sess)
     remaining = max(0.0, session_dur - _elapsed_seconds(sess)) if sess.session_active else session_dur
     

@@ -6,9 +6,10 @@ Provides RMSSD and LF-power calculations from RR-interval series.
 
 import math
 import numpy as np
+from typing import Optional
 
 
-def compute_rmssd(rr_ms: list[float]) -> float | None:
+def compute_rmssd(rr_ms: list) -> Optional[float]:
     """Compute RMSSD from a list of RR intervals (in ms)."""
     if len(rr_ms) < 2:
         return None
@@ -17,7 +18,7 @@ def compute_rmssd(rr_ms: list[float]) -> float | None:
     return math.sqrt(sum(sq) / len(sq))
 
 
-def compute_lf_power(rr_ms: list[float], fs: float = 4.0) -> float | None:
+def compute_lf_power(rr_ms: list, fs: float = 4.0) -> Optional[float]:
     """
     Compute LF power (0.04–0.15 Hz) from RR intervals using FFT.
 
