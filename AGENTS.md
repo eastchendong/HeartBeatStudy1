@@ -430,6 +430,20 @@ A dedicated page at `/cdi-prbf` for CDI research group's Personalized Resonance 
 
 ---
 
+## Bug Fixes & Changelog
+
+### 2026-04-03: Admin Dashboard X-Axis Fix
+**Issue:** Session analysis charts in the admin dashboard (`/admin`) displayed incorrect X-axis labels. The X-axis was hardcoded to show 0-120s regardless of the actual session duration (e.g., 300s sessions would still show 0-120s labels).
+
+**Fix:** Modified `renderSvgChart()` in `server/templates/admin.html` to dynamically generate X-axis labels based on `data.config.session_duration`. The chart now displays 5 evenly-spaced labels (0%, 25%, 50%, 75%, 100%) matching the actual session duration.
+
+**Impact:** 
+- Data visualization accuracy improved for all session durations
+- No breaking changes to data storage or API
+- Backward compatible with existing session files
+
+---
+
 ## Related Documentation
 
 - `README.md` – User-facing setup and usage guide

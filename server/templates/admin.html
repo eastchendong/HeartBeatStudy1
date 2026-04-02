@@ -1065,11 +1065,19 @@ function renderSvgChart(containerId, data) {
     yLabels.push(`<text x="${padding.left - 5}" y="${y + 3}" fill="#8b949e" font-size="10" text-anchor="end">${Math.round(value)}</text>`);
   }
   
-  // X-axis labels (0s, 30s, 60s, 90s, 120s)
-  const xLabels = [0, 30, 60, 90, 120].map(sec => {
-    const x = padding.left + (sec / 120) * chartWidth;
-    return `<text x="${x}" y="${height - 5}" fill="#8b949e" font-size="10" text-anchor="middle">${sec}s</text>`;
-  });
+  // X-axis labels based on actual session duration
+  // Get duration from config or estimate from data (assuming 1 BPM reading per second)
+  const config = data.config || {};
+  const sessionDuration = config.session_duration || 120;
+  
+  // Generate labels at appropriate intervals based on duration
+  const numLabels = 5; // Always show 5 labels (0%, 25%, 50%, 75%, 100%)
+  const xLabels = [];
+  for (let i = 0; i < numLabels; i++) {
+    const sec = Math.round((sessionDuration / (numLabels - 1)) * i);
+    const x = padding.left + (sec / sessionDuration) * chartWidth;
+    xLabels.push(`<text x="${x}" y="${height - 5}" fill="#8b949e" font-size="10" text-anchor="middle">${sec}s</text>`);
+  }
   
   // Stats text
   const avgBpm = (bpmReadings.reduce((a, b) => a + b, 0) / bpmReadings.length).toFixed(1);

@@ -143,6 +143,21 @@ Cycles update smoothly at each cycle boundary (no abrupt restarts mid-breath).
 
 ---
 
+## Admin Dashboard
+
+A web-based admin dashboard is available at `/admin` for session data management:
+
+- **Session Management:** View, filter, sort, and download session data
+- **Data Visualization:** Charts show BPM trends with correct time-axis labels (0s to actual session duration)
+- **Batch Operations:** Download multiple sessions as ZIP
+- **PRBF Metrics:** Compare resonance breathing metrics across sessions
+
+### Access
+1. Navigate to `https://<your-server>/admin/login`
+2. Default credentials: `admin` / `admin` (change via `HEARTBEAT_ADMIN_USER` and `HEARTBEAT_ADMIN_PASS` env vars)
+
+---
+
 ## Testing without hardware
 
 You can simulate sensor data with `curl`:
