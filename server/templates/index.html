@@ -601,7 +601,7 @@
   <!-- Mode selector -->
   <div class="mode-tabs">
     <button class="mode-tab active" id="tab-adaptive">🧪 个体共振频率 (PRBF)</button>
-    <button class="mode-tab" id="tab-resonance">❤️ 共振呼吸</button>
+    <button class="mode-tab" id="tab-resonance" style="display:none">❤️ 共振呼吸</button>
     <button class="mode-tab" id="tab-buteyko">🌬️ 布捷伊科屏气</button>
   </div>
 
@@ -698,6 +698,11 @@
         <div class="form-group" style="margin-bottom:0.8rem">
           <label for="adp-best-freq-input">最佳频率 (bpm)</label>
           <input type="number" id="adp-best-freq-input" value="" min="4" max="12" step="0.1" placeholder="先完成测试或手动输入"/>
+          <div id="adp-cache-hint" style="display:none;font-size:0.8rem;color:var(--muted);margin-top:0.3rem">
+            上次测试结果：<span style="color:var(--accent);font-weight:600" id="adp-cache-freq"></span> bpm
+            <span id="adp-cache-date" style="opacity:0.7"></span> ·
+            <a id="adp-cache-use" style="cursor:pointer;color:var(--accent);text-decoration:underline">使用</a>
+          </div>
         </div>
         <div class="form-group" style="margin-bottom:0.8rem">
           <label for="adp-train-duration">训练时长 (分钟)</label>
@@ -750,6 +755,12 @@
     <div class="form-group">
       <label for="b-cfg-rounds">屏气轮数</label>
       <input type="number" id="b-cfg-rounds" value="5" min="1" max="20"/>
+    </div>
+
+    <div id="b-bolt-cache-hint" style="display:none;font-size:0.82rem;color:var(--muted);margin-top:0.5rem;margin-bottom:0.3rem;padding:0.6rem 0.8rem;background:var(--bg);border:1px solid var(--border);border-radius:8px">
+      上次 BOLT 值：<span style="color:var(--accent);font-weight:600" id="b-bolt-cache-val"></span>s
+      <span id="b-bolt-cache-date" style="opacity:0.7"></span> ·
+      <a id="b-bolt-cache-use" style="cursor:pointer;color:var(--accent);text-decoration:underline">使用上次值</a>
     </div>
 
     <button id="bolt-test-btn" style="width:100%;padding:0.75em;border:none;border-radius:10px;background:var(--accent);color:#fff;font-size:1.05rem;font-weight:600;cursor:pointer;margin-top:0.5rem">
@@ -990,6 +1001,38 @@ function api(path) {
   const sep = path.includes('?') ? '&' : '?';
   return `${path}${sep}id=${encodeURIComponent(SESSION_ID)}`;
 }
+
+// ── Per-user localStorage cache (survives browser restarts) ──────────────
+function getUserCache(key) {
+  try { return JSON.parse(localStorage.getItem(`hb_${key}_${USERNAME}`)); } catch { return null; }
+}
+function setUserCache(key, val) {
+  try { localStorage.setItem(`hb_${key}_${USERNAME}`, JSON.stringify(val)); } catch {}
+}
+
+// ── Restore cached values on page load ─────────────────────────────────
+function updateAdpCacheHint() {
+  const c = getUserCache('prbf');
+  const el = document.getElementById('adp-cache-hint');
+  if (!c || !el) return;
+  document.getElementById('adp-cache-freq').textContent = c.freq.toFixed(2);
+  document.getElementById('adp-cache-date').textContent = '(' + c.date + ')';
+  el.style.display = '';
+}
+
+(function initCacheHints() {
+  const c = getUserCache('prbf');
+  if (c) {
+    document.getElementById('adp-best-freq-input').value = c.freq.toFixed(2);
+    updateAdpCacheHint();
+  }
+  const bc = getUserCache('bolt');
+  if (bc) {
+    document.getElementById('b-bolt-cache-val').textContent = bc.bolt.toFixed(1);
+    document.getElementById('b-bolt-cache-date').textContent = '(' + bc.date + ')';
+    document.getElementById('b-bolt-cache-hint').style.display = '';
+  }
+})();
 
 // ══════════════════════════════════════════════════════════════════════════
 // CONSTANTS
@@ -1870,6 +1913,9 @@ document.getElementById('adp-apply-btn').addEventListener('click', () => {
     adpBestFreqValue.textContent = best.freq.toFixed(2);
     adpBestFreqDisplay.style.display = 'block';
     adpTrainBtn.textContent = `开始 PRBF 训练（${best.freq.toFixed(2)} bpm）`;
+    // Cache PRBF result for this user
+    setUserCache('prbf', { freq: best.freq, date: new Date().toLocaleDateString() });
+    updateAdpCacheHint();
   }
 
   adaptiveDoneEl.classList.remove('visible');
@@ -1889,6 +1935,20 @@ document.getElementById('adp-restart-btn').addEventListener('click', async () =>
   setMode('adaptive');
   showScreen('start-screen');
   footerEl.textContent = 'HeartBeat 呼吸训练 · 连接设备后开始';
+});
+
+// ── Cache click handlers ─────────────────────────────────────────────────
+// PRBF cache "使用" link
+document.getElementById('adp-cache-use').addEventListener('click', () => {
+  const c = getUserCache('prbf');
+  if (!c) return;
+  prbfBestFreq = c.freq;
+  adpBestFreqInput.value = c.freq.toFixed(2);
+  cfgCycle.value = bpmToCycle(c.freq).toFixed(2);
+  document.getElementById('adp-best-freq-value').textContent = c.freq.toFixed(2);
+  document.getElementById('adp-best-freq-display').style.display = 'block';
+  updateAdpTrainRatioHint();
+  footerEl.textContent = '已应用缓存的 PRBF 测试结果';
 });
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -1916,6 +1976,11 @@ const adaptiveDoneEl  = document.getElementById('adaptive-done');
 
 // ── BOLT TEST ──────────────────────────────────────────────────────────────
 document.getElementById('bolt-test-btn').addEventListener('click', () => {
+  if (bBoltSeconds != null) {
+    // BOLT value already filled from cache — skip the test screen
+    onBoltComplete(bBoltSeconds);
+    return;
+  }
   showScreen('buteyko-bolt-screen');
 });
 
@@ -1949,6 +2014,9 @@ document.getElementById('bolt-manual-confirm').addEventListener('click', () => {
 });
 
 function onBoltComplete(boltSec) {
+  // Cache BOLT result for this user
+  setUserCache('bolt', { bolt: boltSec, date: new Date().toLocaleDateString() });
+
   // Read user's Buteyko form config
   bConfig.inhale_sec       = parseFloat(document.getElementById('b-cfg-inhale').value) || 4;
   bConfig.exhale_sec       = parseFloat(document.getElementById('b-cfg-exhale').value) || 6;
@@ -1969,7 +2037,20 @@ function onBoltComplete(boltSec) {
   showScreen('buteyko-config-screen');
 }
 
+function resetBoltTestUI() {
+  clearInterval(bBoltInterval);
+  bBoltStart = null;
+  bBoltInterval = null;
+  bBoltSeconds = null;
+  document.getElementById('bolt-display').textContent = '0.0';
+  document.getElementById('bolt-start-btn').style.display = '';
+  document.getElementById('bolt-end-btn').style.display = 'none';
+  document.getElementById('bolt-status-text').textContent = '准备好后点击"开始屏气"';
+  document.getElementById('bolt-manual-wrap').style.display = 'none';
+}
+
 document.getElementById('buteyko-back-btn').addEventListener('click', () => {
+  resetBoltTestUI();
   setMode('buteyko');
   showScreen('start-screen');
 });
@@ -1991,6 +2072,17 @@ document.getElementById('buteyko-begin-btn').addEventListener('click', async () 
   });
 
   startButeykoTraining();
+});
+
+// BOLT cache "使用上次值" link
+document.getElementById('b-bolt-cache-use').addEventListener('click', () => {
+  const c = getUserCache('bolt');
+  if (!c) return;
+  bBoltSeconds = c.bolt;
+  document.getElementById('b-bolt-cache-use').textContent = '已加载 ✓';
+  document.getElementById('b-bolt-cache-use').style.textDecoration = 'none';
+  document.getElementById('b-bolt-cache-use').style.cursor = 'default';
+  footerEl.textContent = `已加载上次 BOLT 值：${c.bolt.toFixed(1)}s — 点击"下一步"继续`;
 });
 
 // ── BUTEYKO TRAINING ───────────────────────────────────────────────────────
@@ -2485,6 +2577,9 @@ function updateAdpTrainRatioHint() {
   const inhaleSec = (cycle * adpTrainInhaleRatio / (adpTrainInhaleRatio + adpTrainExhaleRatio)).toFixed(1);
   const exhaleSec = (cycle * adpTrainExhaleRatio / (adpTrainInhaleRatio + adpTrainExhaleRatio)).toFixed(1);
   adpTrainRatioHint.textContent = `吸气 : 呼气 = ${adpTrainInhaleRatio} : ${adpTrainExhaleRatio} （${inhaleSec}s : ${exhaleSec}s）`;
+  // Update train button text when frequency changes
+  const rawVal = parseFloat(adpBestFreqInput.value);
+  if (rawVal > 0) adpTrainBtn.textContent = `开始 PRBF 训练（${rawVal.toFixed(2)} bpm）`;
 }
 
 adpTestRatioBtns.forEach(btn => {
