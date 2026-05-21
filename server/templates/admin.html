@@ -613,13 +613,21 @@
   <!-- Actions -->
   <div class="actions-bar">
     <span class="info" id="result-info">加载中...</span>
+    <span class="filter-group" style="margin-bottom:0">
+      <label style="font-size:0.78rem">导出格式</label>
+      <select id="export-format" style="font-size:0.82rem;padding:0.3em 0.5em">
+        <option value="json">JSON</option>
+        <option value="txt">TXT (制表符分隔)</option>
+        <option value="xlsx">Excel (.xlsx)</option>
+      </select>
+    </span>
     <button class="action-btn primary" id="btn-download-zip" onclick="downloadSelectedZip()" disabled>
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-      下载选中 (ZIP)
+      导出选中
     </button>
     <button class="action-btn" id="btn-download-filtered" onclick="downloadFilteredZip()">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-      下载筛选结果 (ZIP)
+      导出筛选结果
     </button>
     <button class="action-btn" onclick="selectAll()">全选</button>
     <button class="action-btn" onclick="selectNone()">取消全选</button>
@@ -854,40 +862,48 @@ function updateDownloadButton() {
   analyzeBtn.disabled = selectedFiles.size === 0;
 }
 
+// Current export format
+function getExportFormat() {
+  return document.getElementById('export-format').value;
+}
+
 // Downloads
 function downloadSession(filename) {
-  window.location.href = `/api/admin/sessions/download/${encodeURIComponent(filename)}`;
+  const fmt = getExportFormat();
+  window.location.href = `/api/admin/sessions/export/${encodeURIComponent(filename)}?format=${fmt}`;
 }
 
 async function downloadSelectedZip() {
   if (selectedFiles.size === 0) return;
-  await downloadZip({ filenames: Array.from(selectedFiles) });
+  const fmt = getExportFormat();
+  await downloadZip({ filenames: Array.from(selectedFiles), format: fmt });
 }
 
 async function downloadFilteredZip() {
   const username = document.getElementById('filter-username').value.trim();
   const type = document.getElementById('filter-type').value;
-  await downloadZip({ username, training_type: type });
+  const fmt = getExportFormat();
+  await downloadZip({ username, training_type: type, format: fmt });
 }
 
 async function downloadZip(body) {
   const btn = document.getElementById('btn-download-filtered');
   btn.disabled = true;
   btn.textContent = '打包中...';
-  
+
   try {
-    const resp = await fetch('/api/admin/sessions/download-zip', {
+    const resp = await fetch('/api/admin/sessions/export-zip', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    
+
     if (resp.ok) {
       const blob = await resp.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `heartbeat_sessions_${new Date().toISOString().slice(0, 10)}.zip`;
+      a.download = `heartbeat_export_${new Date().toISOString().slice(0, 10)}.zip`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);

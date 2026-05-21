@@ -317,3 +317,209 @@ def view_session(filename: str):
             data["hrv_rmssd"] = round(rmssd, 2)
     
     return jsonify(data)
+
+
+# ── Export helpers ─────────────────────────────────────────────────────────
+
+def _export_session_to_txt(data: Dict[str, Any]) -> str:
+    """Convert session data to tab-separated TXT with header metadata."""
+    lines = []
+    lines.append("# HeartBeat Session Export")
+    lines.append(f"# Session ID: {data.get('id', '')}")
+    lines.append(f"# Username: {data.get('username', '')}")
+    lines.append(f"# Date: {data.get('timestamp', '')}")
+    lines.append(f"# Training Type: {data.get('training_type', '')}")
+    lines.append(f"# RR Count: {data.get('rr_count', 0)}")
+    bpm_min = data.get('bpm_min', '')
+    bpm_avg = data.get('bpm_avg', '')
+    bpm_max = data.get('bpm_max', '')
+    lines.append(f"# BPM (min/avg/max): {bpm_min} / {bpm_avg} / {bpm_max}")
+    lines.append(f"# HRV RMSSD: {data.get('hrv_rmssd', '')} ms")
+    lines.append(f"# LF Power: {data.get('lf_power', '')}")
+    lines.append("#")
+    lines.append("# Columns: timestamp\trr_interval_ms\theart_rate_bpm")
+    lines.append("timestamp\trr_interval_ms\theart_rate_bpm")
+
+    rr_intervals = data.get("rr_intervals_ms", []) or data.get("rr_intervals", [])
+    rr_timestamps = data.get("rr_timestamps", [])
+
+    for i, rr in enumerate(rr_intervals):
+        ts = rr_timestamps[i] if i < len(rr_timestamps) else ""
+        if ts is not None and isinstance(ts, (int, float)):
+            ts = datetime.fromtimestamp(ts).isoformat()
+        hr = round(60000.0 / rr, 1) if rr > 0 else ""
+        lines.append(f"{ts}\t{rr}\t{hr}")
+
+    return "\n".join(lines)
+
+
+def _export_session_to_xlsx(data: Dict[str, Any]) -> io.BytesIO:
+    """Convert session data to an Excel workbook with Info + Data sheets."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    wb = openpyxl.Workbook()
+
+    # Sheet 1: Session Info
+    ws_info = wb.active
+    ws_info.title = "Session Info"
+    ws_info.column_dimensions['A'].width = 20
+    ws_info.column_dimensions['B'].width = 45
+
+    label_font = Font(bold=True)
+    ws_info.cell(row=1, column=1, value="HeartBeat Session Export").font = Font(bold=True, size=13)
+
+    info_fields = [
+        ("Session ID", data.get("id", "")),
+        ("Username", data.get("username", "")),
+        ("Date", data.get("timestamp", "")),
+        ("Training Type", data.get("training_type", "")),
+        ("RR Count", data.get("rr_count", 0)),
+        ("BPM (min/avg/max)",
+         f"{data.get('bpm_min', '')} / {data.get('bpm_avg', '')} / {data.get('bpm_max', '')}"),
+        ("HRV RMSSD (ms)", data.get("hrv_rmssd", "")),
+        ("LF Power", data.get("lf_power", "")),
+    ]
+    for i, (label, value) in enumerate(info_fields, start=3):
+        ws_info.cell(row=i, column=1, value=label).font = label_font
+        ws_info.cell(row=i, column=2, value=str(value) if value is not None else "")
+
+    # Sheet 2: Data
+    ws_data = wb.create_sheet("Data")
+    hdr_font = Font(bold=True, color="FFFFFF")
+    hdr_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+
+    for col, (name, width) in enumerate(
+        [("timestamp", 22), ("rr_interval_ms", 16), ("heart_rate_bpm", 16)], start=1
+    ):
+        cell = ws_data.cell(row=1, column=col, value=name)
+        cell.font = hdr_font
+        cell.fill = hdr_fill
+        ws_data.column_dimensions[get_column_letter(col)].width = width
+
+    rr_intervals = data.get("rr_intervals_ms", []) or data.get("rr_intervals", [])
+    rr_timestamps = data.get("rr_timestamps", [])
+
+    for i, rr in enumerate(rr_intervals):
+        row = i + 2
+        ts = rr_timestamps[i] if i < len(rr_timestamps) else ""
+        if ts is not None and isinstance(ts, (int, float)):
+            ts = datetime.fromtimestamp(ts).isoformat()
+        ws_data.cell(row=row, column=1, value=ts)
+        ws_data.cell(row=row, column=2, value=rr)
+        if rr > 0:
+            ws_data.cell(row=row, column=3, value=round(60000.0 / rr, 1))
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output
+
+
+def _build_export(data: Dict[str, Any], fmt: str, base_name: str):
+    """Return (BytesIO, mimetype, download_name) for the chosen format."""
+    if fmt == "txt":
+        content = _export_session_to_txt(data).encode("utf-8")
+        return io.BytesIO(content), "text/plain; charset=utf-8", f"{base_name}.txt"
+    elif fmt == "xlsx":
+        return _export_session_to_xlsx(data), \
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", \
+            f"{base_name}.xlsx"
+    else:
+        content = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
+        return io.BytesIO(content), "application/json; charset=utf-8", f"{base_name}.json"
+
+
+# ── Export endpoints ───────────────────────────────────────────────────────
+
+@admin_api_bp.route("/api/admin/sessions/export/<path:filename>")
+@admin_required
+def export_session(filename: str):
+    """Export a single session in txt, xlsx, or json format."""
+    fmt = request.args.get("format", "json").lower()
+    if fmt not in ("txt", "xlsx", "json"):
+        abort(400, description="Invalid format. Use: txt, xlsx, json")
+
+    if not filename.endswith(".json") or "/" in filename or "\\" in filename or ".." in filename:
+        abort(400, description="Invalid filename")
+
+    filepath = state.DATA_DIR / filename
+    if not filepath.exists() or not filepath.is_file():
+        abort(404, description="File not found")
+
+    data = load_session_data(filepath)
+    if not data:
+        abort(500, description="Failed to load session data")
+
+    base_name = filename.rsplit(".", 1)[0]
+    content, mimetype, download_name = _build_export(data, fmt, base_name)
+
+    return send_file(
+        content,
+        mimetype=mimetype,
+        as_attachment=True,
+        download_name=download_name,
+    )
+
+
+@admin_api_bp.route("/api/admin/sessions/export-zip", methods=["POST"])
+@admin_required
+def export_zip():
+    """
+    Download multiple sessions as a ZIP file in the selected format.
+
+    Request body:
+        - filenames: List of filenames to include
+        - format: "txt", "xlsx", or "json" (default "json")
+        - Or use filters to auto-select
+    """
+    body = request.get_json(silent=True) or {}
+    filenames = body.get("filenames", [])
+    fmt = body.get("format", "json").lower()
+
+    if fmt not in ("txt", "xlsx", "json"):
+        return jsonify({"ok": False, "error": "Invalid format"}), 400
+
+    if not filenames:
+        username_filter = body.get("username", "").strip().lower()
+        training_type_filter = body.get("training_type", "").strip()
+
+        files = list(state.DATA_DIR.glob("session_*.json"))
+        for f in files:
+            info = get_session_info(f)
+            if not info:
+                continue
+            if username_filter and username_filter not in info["username"].lower():
+                continue
+            if training_type_filter and info["training_type"] != training_type_filter:
+                continue
+            filenames.append(info["filename"])
+
+    if not filenames:
+        return jsonify({"ok": False, "error": "No files selected"}), 400
+
+    memory_file = io.BytesIO()
+    with zipfile.ZipFile(memory_file, "w", zipfile.ZIP_DEFLATED) as zf:
+        for filename in filenames:
+            if not filename.endswith(".json") or "/" in filename or "\\" in filename or ".." in filename:
+                continue
+            filepath = state.DATA_DIR / filename
+            if not filepath.exists() or not filepath.is_file():
+                continue
+            data = load_session_data(filepath)
+            if not data:
+                continue
+            base_name = filename.rsplit(".", 1)[0]
+            content, _, export_name = _build_export(data, fmt, base_name)
+            zf.writestr(export_name, content.read())
+
+    memory_file.seek(0)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    return send_file(
+        memory_file,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=f"heartbeat_export_{timestamp}.zip",
+    )

@@ -55,8 +55,9 @@ def _save_session_to_file(sess: state.SessionState, username: str = "", training
     with sess.lock:
         if not username:
             username = sess.session_config.get("username", "")
-        rr_data  = list(sess.rr_intervals)
-        bpm_data = list(sess.bpm_all)
+        rr_data     = list(sess.rr_intervals)
+        rr_ts_data  = list(sess.rr_timestamps)
+        bpm_data    = list(sess.bpm_all)
 
     final_rmssd = compute_rmssd(rr_data)
     final_lf    = compute_lf_power(rr_data)
@@ -76,6 +77,7 @@ def _save_session_to_file(sess: state.SessionState, username: str = "", training
         "training_type":    training_type,
         "config":           config_snap,
         "rr_intervals_ms":  rr_data,
+        "rr_timestamps":    rr_ts_data,
         "rr_count":         len(rr_data),
         "bpm_readings":     bpm_data,
         "bpm_max":          round(max(bpm_data), 1) if bpm_data else None,
