@@ -1187,40 +1187,18 @@ function updateBlossomUI(result) {
 // ── Baseline: no visual guidance ──────────────────────────────────────────
 async function startBaselineTest() {
   const durationSec = testDuration * 60;
-  const lfThreshold = parseInt(document.getElementById('lf-threshold').value) || 500;
+  coherenceTracker = null;
+  blossomEffect = null;
 
-  // Init coherence tracker with virtual 0.1 Hz reference (no visual guidance)
-  coherenceTracker = new window.RSACoherenceTracker();
-  lastLfFromSSE = null;
-
-  // Init blossom with custom threshold
-  const particleCanvas = document.getElementById('particle-canvas');
-  blossomEffect = new window.LFBlossomEffect(particleCanvas, { threshold: lfThreshold });
-  blossomEffect.startSession();
-
-  // Time-series data collection
+  // Time-series data collection (BPM + LF only)
   const sessionStartTs = performance.now() / 1000;
   controlGroupData = { bpm: [], lf: [], coherence: [], timestamps: [] };
 
-  // Record data + blossom + coherence every 1s
   blossomInterval = setInterval(() => {
     const elapsed = Math.round(performance.now() / 1000 - sessionStartTs);
     controlGroupData.timestamps.push(elapsed);
     controlGroupData.bpm.push(lastBpmFromSSE || 0);
     controlGroupData.lf.push(lastLfFromSSE || 0);
-    // Coherence: use virtual 0.1 Hz sine wave as reference
-    if (coherenceTracker && lastBpmFromSSE > 0) {
-      const virtualPhase = (elapsed * 0.1) % 1; // 0.1 Hz virtual breathing phase
-      coherenceTracker.update(lastBpmFromSSE, performance.now() / 1000, virtualPhase, 0.1);
-      controlGroupData.coherence.push(coherenceTracker.smoothedCoherence);
-      document.getElementById('coherence-score').textContent = coherenceTracker.smoothedCoherence.toFixed(3);
-    } else {
-      controlGroupData.coherence.push(0);
-    }
-    if (blossomEffect && lastLfFromSSE !== null) {
-      const result = blossomEffect.update(lastLfFromSSE);
-      updateBlossomUI(result);
-    }
   }, 1000);
 
   await fetch(api('/api/cdi-prbf/configure'), {
@@ -1240,10 +1218,10 @@ async function startBaselineTest() {
   testState.isRunning = true;
   showScreen('test');
 
-  // Show timer + coherence + blossom, hide breathing circle
+  // Show timer only, hide everything else
   document.getElementById('baseline-timer-bar').style.display = 'flex';
-  document.getElementById('coherence-info').style.display = '';
-  document.getElementById('blossom-info').style.display = '';
+  document.getElementById('coherence-info').style.display = 'none';
+  document.getElementById('blossom-info').style.display = 'none';
   document.getElementById('circle-wrap').style.display = 'none';
   document.querySelector('.stages-container').style.display = 'none';
   document.querySelectorAll('.info-bar')[0].style.display = 'none';
@@ -1360,8 +1338,63 @@ async function showResults() {
 }
 
 function showTimerResults() {
-  // Both control_group and baseline get chart-based results
-  showControlGroupResults();
+  if (testMode === 'baseline') {
+    showBaselineChartResults();
+  } else {
+    showControlGroupResults();
+  }
+}
+
+function showBaselineChartResults() {
+  const d = controlGroupData || { bpm: [], lf: [], timestamps: [] };
+  const avgFn = arr => arr.length ? (arr.reduce((a, b) => a + b, 0) / arr.length) : 0;
+
+  document.querySelector('.result-card.best-result').style.display = '';
+  document.querySelectorAll('.result-card')[1].style.display = '';
+  document.getElementById('results-stats').innerHTML = '';
+  document.getElementById('results-charts').innerHTML = '';
+  document.getElementById('results-table-el').style.display = 'none';
+
+  document.getElementById('results-title').textContent = 'Baseline 测试结果';
+  document.getElementById('best-freq').textContent = '无视觉引导';
+  document.getElementById('best-freq-label').textContent = '模式';
+  document.getElementById('best-cycle').textContent = `${testDuration} 分钟`;
+  document.getElementById('best-cycle-label').textContent = '时长';
+
+  // Simple stats: BPM and LF averages
+  const validBpm = d.bpm.filter(v => v > 0);
+  const avgBpm = validBpm.length ? (validBpm.reduce((a, b) => a + b, 0) / validBpm.length) : 0;
+  const avgLf = avgFn(d.lf);
+
+  document.getElementById('results-stats').innerHTML = `
+    <div class="chart-summary">
+      <div class="chart-stat">
+        <div class="label">平均心率</div>
+        <div class="value" style="color:var(--red)">${avgBpm.toFixed(1)}</div>
+        <div style="font-size:0.7rem;color:var(--muted)">BPM</div>
+      </div>
+      <div class="chart-stat">
+        <div class="label">平均 LF Power</div>
+        <div class="value" style="color:var(--green)">${avgLf.toFixed(2)}</div>
+        <div style="font-size:0.7rem;color:var(--muted)">ms²</div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('results-table-title').textContent = '生理数据趋势';
+  document.getElementById('results-body').innerHTML = '';
+  document.getElementById('results-charts').innerHTML = `
+    <div class="chart-card" style="margin-bottom:1rem">
+      <h4>心率 (BPM)</h4>
+      ${buildSvgChart(d.timestamps, d.bpm.filter(v => v > 0), '#f85149', 'BPM')}
+    </div>
+    <div class="chart-card">
+      <h4>LF Power (ms²)</h4>
+      ${buildSvgChart(d.timestamps, d.lf, '#3fb950', 'ms²')}
+    </div>
+  `;
+
+  showScreen('results');
 }
 
 function showControlGroupResults() {
@@ -1644,10 +1677,10 @@ document.querySelectorAll('#mode-select .ratio-btn').forEach(btn => {
     document.querySelectorAll('#mode-select .ratio-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     testMode = btn.dataset.mode;
-    // Show duration + LF threshold for control_group and baseline
+    // Show duration + LF threshold for control_group only
     const showTimerOpts = (testMode === 'control_group' || testMode === 'baseline');
     document.getElementById('duration-group').style.display = showTimerOpts ? '' : 'none';
-    document.getElementById('lf-threshold-group').style.display = showTimerOpts ? '' : 'none';
+    document.getElementById('lf-threshold-group').style.display = testMode === 'control_group' ? '' : 'none';
     // Show/hide ratio selector (only for find_prbf)
     const ratioEls = document.querySelectorAll('#start-screen .ratio-btn');
     ratioEls.forEach(b => {
