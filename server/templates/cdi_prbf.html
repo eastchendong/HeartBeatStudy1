@@ -635,6 +635,11 @@
       <div class="value" id="baseline-bpm-value" style="color:var(--red)">--</div>
       <div class="unit">BPM</div>
     </div>
+    <div class="info-item" id="blossom-info" style="display:none">
+      <div class="label">激励次数</div>
+      <div class="value" id="blossom-count" style="color:#f778ba">0/5</div>
+      <div class="unit">LF Power</div>
+    </div>
   </div>
 
   <!-- Breathing circle (control_group only) -->
@@ -645,6 +650,7 @@
       <circle id="arc-fill"  cx="50" cy="50" r="47" stroke-dasharray="295.3" stroke-dashoffset="295.3"/>
     </svg>
     <div id="breath-circle"></div>
+    <canvas id="particle-canvas" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:10"></canvas>
     <span id="phase-text">–</span>
   </div>
 
@@ -702,6 +708,7 @@
 
 <script src="{{ url_for('static', filename='js/browser_ble_heart_relay.js') }}"></script>
 <script src="{{ url_for('static', filename='js/coherence.js') }}"></script>
+<script src="{{ url_for('static', filename='js/flowerEffect.js') }}"></script>
 <script>
 // ══════════════════════════════════════════════════════════════════════════
 // Constants & Config
@@ -764,6 +771,11 @@ let lastBpmFromSSE = 0;
 let baselineTimerInterval = null;
 let baselineRemaining = 0;
 let baselineStartTime = null;
+
+// LF Blossom (control_group only)
+let blossomEffect = null;
+let blossomInterval = null;
+let lastLfFromSSE = null;
 
 // ══════════════════════════════════════════════════════════════════════════
 // Elements
@@ -1034,6 +1046,7 @@ async function startFindPrbfTest() {
 
   // Show find_prbf elements
   document.getElementById('baseline-timer-bar').style.display = 'none';
+  document.getElementById('blossom-info').style.display = 'none';
   document.getElementById('circle-wrap').style.display = '';
   document.querySelector('.stages-container').style.display = '';
   document.querySelectorAll('.info-bar')[0].style.display = '';
@@ -1049,6 +1062,19 @@ async function startFindPrbfTest() {
 async function startControlGroupTest() {
   const durationSec = testDuration * 60;
   coherenceTracker = new window.RSACoherenceTracker();
+
+  // Init blossom effect
+  const particleCanvas = document.getElementById('particle-canvas');
+  blossomEffect = new window.LFBlossomEffect(particleCanvas);
+  blossomEffect.startSession();
+
+  // Check blossom every 1s (matching Unity LFPowerAnalyzer analysis interval)
+  blossomInterval = setInterval(() => {
+    if (blossomEffect && lastLfFromSSE !== null) {
+      const result = blossomEffect.update(lastLfFromSSE);
+      updateBlossomUI(result);
+    }
+  }, 1000);
 
   await fetch(api('/api/cdi-prbf/configure'), {
     method: 'POST',
@@ -1079,6 +1105,7 @@ async function startControlGroupTest() {
 
   // Show breathing circle, hide stages, show timer
   document.getElementById('baseline-timer-bar').style.display = 'flex';
+  document.getElementById('blossom-info').style.display = '';
   document.getElementById('circle-wrap').style.display = '';
   document.querySelector('.stages-container').style.display = 'none';
   document.querySelectorAll('.info-bar')[0].style.display = 'none';
@@ -1086,6 +1113,14 @@ async function startControlGroupTest() {
 
   startBreathing();
   startBaselineTimer(durationSec);
+}
+
+function updateBlossomUI(result) {
+  // Update blossom-related UI if needed (e.g., progress counter)
+  const blossomEl = document.getElementById('blossom-count');
+  if (blossomEl) {
+    blossomEl.textContent = `${result.count}/5`;
+  }
 }
 
 // ── Baseline: no visual guidance ──────────────────────────────────────────
@@ -1112,6 +1147,7 @@ async function startBaselineTest() {
 
   // Show timer only, hide everything else
   document.getElementById('baseline-timer-bar').style.display = 'flex';
+  document.getElementById('blossom-info').style.display = 'none';
   document.getElementById('circle-wrap').style.display = 'none';
   document.querySelector('.stages-container').style.display = 'none';
   document.querySelectorAll('.info-bar')[0].style.display = 'none';
@@ -1160,11 +1196,17 @@ async function stopTest() {
     clearInterval(baselineTimerInterval);
     baselineTimerInterval = null;
   }
+  if (blossomInterval) {
+    clearInterval(blossomInterval);
+    blossomInterval = null;
+  }
   await fetch(api('/api/cdi-prbf/stop'), { method: 'POST' });
   await fetch(api('/api/cdi-prbf/reset'), { method: 'POST' });
 
   testState.isRunning = false;
   coherenceTracker = null;
+  blossomEffect = null;
+  lastLfFromSSE = null;
   showScreen('start');
 }
 
@@ -1322,6 +1364,7 @@ function connectSSE() {
     }
     if (lf_power != null) {
       lfValue.textContent = lf_power.toFixed(3);
+      lastLfFromSSE = lf_power;
     }
   };
   
