@@ -336,8 +336,8 @@
   #breath-circle {
     width: 55%; height: 55%;
     border-radius: 50%;
-    background: radial-gradient(circle at 35% 35%, var(--circle-color, var(--inhale-color)), #1a2433);
-    box-shadow: 0 0 40px 6px var(--circle-color, var(--inhale-color));
+    background: radial-gradient(circle at 35% 35%, var(--circle-color, #ffffff), #1a2433);
+    box-shadow: 0 0 40px 6px var(--circle-color, #ffffff);
     transition: background 0.6s ease, box-shadow 0.6s ease;
     will-change: transform;
   }
@@ -853,30 +853,29 @@ function updateCycleIndicators() {
 // ═══════════════════════════════════════════════════════════════════════════
 const SCALE = { inhale: 1.42, exhale: 0.72 };
 
+function applyCoherenceColor() {
+  // Control group mode: always use coherence-based color
+  const freqHz = CDI_FREQUENCIES[testState.currentStage] / 60;
+  const result = coherenceTracker.update(
+    lastBpmFromSSE || 0,
+    performance.now() / 1000,
+    testState._animPhase || 0,
+    freqHz
+  );
+  const c = result.color;
+  breathCircle.style.setProperty('--circle-color', c);
+  breathCircle.style.background = `radial-gradient(circle at 35% 35%, ${c}, #1a2433)`;
+  breathCircle.style.boxShadow = `0 0 40px 6px ${c}`;
+  ringEl.style.color = c;
+  arcFill.style.stroke = c;
+  phaseText.style.color = c;
+}
+
 function applyPhaseColor(phase) {
-  // For baseline mode, no color changes
   if (testMode === 'baseline') return;
 
-  // If coherence tracker is active, use coherence-based color
-  if (coherenceTracker && lastBpmFromSSE > 0) {
-    const freqHz = CDI_FREQUENCIES[testState.currentStage] / 60;
-    const result = coherenceTracker.update(lastBpmFromSSE, performance.now() / 1000, testState._animPhase || 0, freqHz);
-    const c = result.color;
-    breathCircle.style.setProperty('--circle-color', c);
-    breathCircle.style.background = `radial-gradient(circle at 35% 35%, ${c}, #1a2433)`;
-    breathCircle.style.boxShadow = `0 0 40px 6px ${c}`;
-    ringEl.style.color = c;
-    arcFill.style.stroke = c;
-    phaseText.style.color = c;
-  } else {
-    // Fallback to inhale/exhale colors (first 60s calibration or no data)
-    const c = COLORS[phase];
-    breathCircle.style.setProperty('--circle-color', c);
-    breathCircle.style.background = `radial-gradient(circle at 35% 35%, ${c}, #1a2433)`;
-    breathCircle.style.boxShadow = `0 0 40px 6px ${c}`;
-    ringEl.style.color = c;
-    arcFill.style.stroke = c;
-    phaseText.style.color = c;
+  if (coherenceTracker) {
+    applyCoherenceColor();
   }
   phaseText.textContent = phase === 'inhale' ? '吸气' : '呼气';
 }
