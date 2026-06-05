@@ -549,6 +549,19 @@
       </div>
     </div>
 
+    <div class="form-group">
+      <label>测试模式</label>
+      <div class="ratio-select" id="mode-select">
+        <button type="button" class="ratio-btn active" data-mode="control_group">常规测试 (视觉引导)</button>
+        <button type="button" class="ratio-btn" data-mode="baseline">基线测试 (无视觉引导)</button>
+      </div>
+    </div>
+
+    <div class="form-group" id="baseline-duration-group" style="display:none">
+      <label>基线测试时长 (分钟)</label>
+      <input type="number" id="baseline-duration" value="6" min="1" max="30" step="1" />
+    </div>
+
     <button id="start-btn">开始测试</button>
   </div>
 </div>
@@ -609,8 +622,22 @@
     </div>
   </div>
 
-  <!-- Breathing circle -->
-  <div class="circle-wrap">
+  <!-- Baseline timer (hidden by default) -->
+  <div class="info-bar" id="baseline-timer-bar" style="display:none">
+    <div class="info-item">
+      <div class="label">剩余时间</div>
+      <div class="value" id="baseline-timer-value" style="font-size:2.5rem;color:var(--accent)">--</div>
+      <div class="unit">秒</div>
+    </div>
+    <div class="info-item">
+      <div class="label">已采集心率</div>
+      <div class="value" id="baseline-bpm-value" style="color:var(--red)">--</div>
+      <div class="unit">BPM</div>
+    </div>
+  </div>
+
+  <!-- Breathing circle (control_group only) -->
+  <div class="circle-wrap" id="circle-wrap">
     <div class="ring" id="ring-el"></div>
     <svg class="arc-svg" viewBox="0 0 100 100">
       <circle id="arc-track" cx="50" cy="50" r="47"/>
@@ -673,6 +700,7 @@
 </footer>
 
 <script src="{{ url_for('static', filename='js/browser_ble_heart_relay.js') }}"></script>
+<script src="{{ url_for('static', filename='js/coherence.js') }}"></script>
 <script>
 // ══════════════════════════════════════════════════════════════════════════
 // Constants & Config
@@ -719,11 +747,22 @@ let testState = {
 
 let inhaleRatio = 5;
 let exhaleRatio = 5;
+let testMode = 'control_group';  // 'control_group' or 'baseline'
+let baselineDuration = 6;        // minutes
 
 // Animation state
 let animFrame = null;
 let phaseStart = null;
 let currentPhase = 'inhale';
+
+// Coherence tracker (control_group mode only)
+let coherenceTracker = null;
+let lastBpmFromSSE = 0;
+
+// Baseline timer
+let baselineTimerInterval = null;
+let baselineRemaining = 0;
+let baselineStartTime = null;
 
 // ══════════════════════════════════════════════════════════════════════════
 // Elements
@@ -815,13 +854,30 @@ function updateCycleIndicators() {
 const SCALE = { inhale: 1.42, exhale: 0.72 };
 
 function applyPhaseColor(phase) {
-  const c = COLORS[phase];
-  breathCircle.style.setProperty('--circle-color', c);
-  breathCircle.style.background = `radial-gradient(circle at 35% 35%, ${c}, #1a2433)`;
-  breathCircle.style.boxShadow = `0 0 40px 6px ${c}`;
-  ringEl.style.color = c;
-  arcFill.style.stroke = c;
-  phaseText.style.color = c;
+  // For baseline mode, no color changes
+  if (testMode === 'baseline') return;
+
+  // If coherence tracker is active, use coherence-based color
+  if (coherenceTracker && lastBpmFromSSE > 0) {
+    const freqHz = CDI_FREQUENCIES[testState.currentStage] / 60;
+    const result = coherenceTracker.update(lastBpmFromSSE, performance.now() / 1000, testState._animPhase || 0, freqHz);
+    const c = result.color;
+    breathCircle.style.setProperty('--circle-color', c);
+    breathCircle.style.background = `radial-gradient(circle at 35% 35%, ${c}, #1a2433)`;
+    breathCircle.style.boxShadow = `0 0 40px 6px ${c}`;
+    ringEl.style.color = c;
+    arcFill.style.stroke = c;
+    phaseText.style.color = c;
+  } else {
+    // Fallback to inhale/exhale colors (first 60s calibration or no data)
+    const c = COLORS[phase];
+    breathCircle.style.setProperty('--circle-color', c);
+    breathCircle.style.background = `radial-gradient(circle at 35% 35%, ${c}, #1a2433)`;
+    breathCircle.style.boxShadow = `0 0 40px 6px ${c}`;
+    ringEl.style.color = c;
+    arcFill.style.stroke = c;
+    phaseText.style.color = c;
+  }
   phaseText.textContent = phase === 'inhale' ? '吸气' : '呼气';
 }
 
@@ -833,22 +889,29 @@ function startPhase(phase, ts) {
 
 function animate(ts) {
   animFrame = requestAnimationFrame(animate);
-  
+
   const elapsed = ts - phaseStart;
   const duration = testState.breathCycle[currentPhase] * 1000;
   const progress = clamp(elapsed / duration, 0, 1);
-  
+
+  // Compute breathing phase (0-1) for coherence tracking
+  if (currentPhase === 'inhale') {
+    testState._animPhase = progress * 0.5; // 0 → 0.5 (inhale)
+  } else {
+    testState._animPhase = 0.5 + progress * 0.5; // 0.5 → 1.0 (exhale)
+  }
+
   // Arc progress
   const phaseOffset = currentPhase === 'inhale' ? 0 : testState.breathCycle.inhale * 1000;
   const cycleProgress = clamp((phaseOffset + elapsed) / (testState.breathCycle.total * 1000), 0, 1);
   arcFill.style.strokeDashoffset = CIRC * (1 - cycleProgress);
-  
+
   // Circle scale
   const scale = currentPhase === 'inhale'
     ? lerp(SCALE.exhale, SCALE.inhale, easeInOut(progress))
     : lerp(SCALE.inhale, SCALE.exhale, easeInOut(progress));
   breathCircle.style.transform = `scale(${scale.toFixed(3)})`;
-  
+
   // Phase complete
   if (progress >= 1) {
     const next = currentPhase === 'inhale' ? 'exhale' : 'inhale';
@@ -904,7 +967,8 @@ async function onCycleComplete() {
     }
     
     if (data.stage_complete) {
-      // New stage - restart breathing with new frequency
+      // New stage - reset coherence tracker for new frequency
+      if (coherenceTracker) coherenceTracker.reset();
       testState.currentStage = data.new_stage - 1; // Convert to 0-indexed
       testState.currentCycle = 0;
       updateStageIndicators();
@@ -923,39 +987,132 @@ async function onCycleComplete() {
 }
 
 async function startTest() {
+  if (testMode === 'baseline') {
+    await startBaselineTest();
+  } else {
+    await startControlGroupTest();
+  }
+}
+
+async function startBaselineTest() {
+  const durationSec = baselineDuration * 60;
+
+  await fetch(api('/api/cdi-prbf/configure'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      mode: 'baseline',
+      duration: durationSec,
+      username: USERNAME,
+    })
+  });
+
+  const resp = await fetch(api('/api/cdi-prbf/start'), { method: 'POST' });
+  const data = await resp.json();
+  if (!data.ok) { alert('启动失败'); return; }
+
+  testState.isRunning = true;
+  showScreen('test');
+
+  // Show baseline timer, hide control_group elements
+  document.getElementById('baseline-timer-bar').style.display = 'flex';
+  document.getElementById('circle-wrap').style.display = 'none';
+  document.querySelector('.stages-container').style.display = 'none';
+  // Hide the first info bar (frequency/cycle info)
+  document.querySelectorAll('.info-bar')[0].style.display = 'none';
+  // Hide cycle indicators in second info bar
+  document.querySelector('.cycle-indicator').parentElement.parentElement.style.display = 'none';
+  // Repurpose BPM/LF/RMSSD info for baseline
+  document.getElementById('freq-value').parentElement.style.display = 'none';
+  document.getElementById('cycle-value').parentElement.style.display = 'none';
+
+  startBaselineTimer(durationSec);
+}
+
+function startBaselineTimer(durationSec) {
+  baselineRemaining = durationSec;
+  baselineStartTime = performance.now() / 1000;
+  updateBaselineTimerDisplay();
+
+  baselineTimerInterval = setInterval(() => {
+    const elapsed = (performance.now() / 1000) - baselineStartTime;
+    baselineRemaining = Math.max(0, durationSec - elapsed);
+    updateBaselineTimerDisplay();
+    if (baselineRemaining <= 0) {
+      clearInterval(baselineTimerInterval);
+      baselineTimerInterval = null;
+      onBaselineComplete();
+    }
+  }, 250);
+}
+
+function updateBaselineTimerDisplay() {
+  const mins = Math.floor(baselineRemaining / 60);
+  const secs = Math.floor(baselineRemaining % 60);
+  document.getElementById('baseline-timer-value').textContent =
+    `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
+async function onBaselineComplete() {
+  stopBreathing();
+  await fetch(api('/api/cdi-prbf/on-baseline-complete'), { method: 'POST' });
+  testState.isRunning = false;
+  showBaselineResults();
+}
+
+async function startControlGroupTest() {
+  // Reset coherence tracker on new test
+  coherenceTracker = new window.RSACoherenceTracker();
+
   // Configure
   await fetch(api('/api/cdi-prbf/configure'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
+      mode: 'control_group',
       cycles_per_frequency: CYCLES_PER_FREQ,
       inhale_ratio: inhaleRatio,
       exhale_ratio: exhaleRatio,
       username: USERNAME,
     })
   });
-  
+
   // Start
   await fetch(api('/api/cdi-prbf/start'), { method: 'POST' });
-  
+
   testState.currentStage = 0;
   testState.currentCycle = 0;
   testState.isRunning = true;
-  
+
   updateStageIndicators();
   updateCycleIndicators();
   showScreen('test');
+
+  // Show control_group elements, hide baseline timer
+  document.getElementById('baseline-timer-bar').style.display = 'none';
+  document.getElementById('circle-wrap').style.display = '';
+  document.querySelector('.stages-container').style.display = '';
+  document.querySelectorAll('.info-bar')[0].style.display = '';
+  document.querySelector('.cycle-indicator').parentElement.parentElement.style.display = '';
+  document.getElementById('freq-value').parentElement.style.display = '';
+  document.getElementById('cycle-value').parentElement.style.display = '';
+
   startBreathing();
 }
 
 async function stopTest() {
   if (!confirm('确定要停止测试吗？当前进度将丢失。')) return;
-  
+
   stopBreathing();
+  if (baselineTimerInterval) {
+    clearInterval(baselineTimerInterval);
+    baselineTimerInterval = null;
+  }
   await fetch(api('/api/cdi-prbf/stop'), { method: 'POST' });
   await fetch(api('/api/cdi-prbf/reset'), { method: 'POST' });
-  
+
   testState.isRunning = false;
+  coherenceTracker = null;
   showScreen('start');
 }
 
@@ -966,20 +1123,24 @@ async function showResults() {
   try {
     const resp = await fetch(api('/api/cdi-prbf/results'));
     const data = await resp.json();
-    
+
     const results = data.stage_results || [];
     const best = data.best_result;
-    
+
+    // Show/hide control_group results sections
+    document.querySelector('.result-card.best-result').style.display = '';
+    document.querySelectorAll('.result-card')[1].style.display = '';
+
     // Update best result
     if (best) {
       document.getElementById('best-freq').textContent = best.frequency.toFixed(2);
       document.getElementById('best-cycle').textContent = best.cycle.toFixed(2) + ' s';
     }
-    
+
     // Build table
     const tbody = document.getElementById('results-body');
     tbody.innerHTML = '';
-    
+
     results.forEach((r, i) => {
       const isBest = best && r.frequency === best.frequency;
       const tr = document.createElement('tr');
@@ -994,11 +1155,44 @@ async function showResults() {
       `;
       tbody.appendChild(tr);
     });
-    
+
     showScreen('results');
   } catch (e) {
     console.error('Show results error:', e);
   }
+}
+
+async function showBaselineResults() {
+  // Show a simple results screen for baseline
+  document.querySelector('.result-card.best-result').style.display = 'none';
+  document.querySelectorAll('.result-card')[1].style.display = 'none';
+
+  // Build baseline summary
+  const mins = Math.floor(baselineDuration);
+  const secs = Math.floor((baselineDuration - mins) * 60);
+  const durText = secs > 0 ? `${mins}分${secs}秒` : `${mins}分钟`;
+
+  // We need to read current BPM/HRV data from the SSE state
+  const currentBpm = lastBpmFromSSE > 0 ? lastBpmFromSSE.toFixed(1) : '--';
+  const currentRmssd = document.getElementById('rmssd-value').textContent;
+  const currentLf = document.getElementById('lf-value').textContent;
+
+  document.getElementById('best-freq').textContent = durText;
+  document.getElementById('best-cycle').textContent = '基线测试';
+  document.getElementById('results-body').innerHTML = `
+    <tr><td colspan="2">模式</td><td colspan="4">基线测试 (无视觉引导)</td></tr>
+    <tr><td colspan="2">时长</td><td colspan="4">${durText}</td></tr>
+    <tr><td colspan="2">实时心率</td><td colspan="4">${currentBpm} BPM</td></tr>
+    <tr><td colspan="2">HRV RMSSD</td><td colspan="4">${currentRmssd} ms</td></tr>
+    <tr><td colspan="2">LF Power</td><td colspan="4">${currentLf} ms²</td></tr>
+  `;
+
+  // Update the header text
+  document.querySelector('.best-result h2').textContent = '基线测试结果';
+  document.querySelector('.best-result h2').style.display = '';
+  document.querySelector('.best-result').style.display = '';
+
+  showScreen('results');
 }
 
 async function saveResults() {
@@ -1008,22 +1202,22 @@ async function saveResults() {
   btn.textContent = '保存中…';
   saveStatus.textContent = '正在计算HRV指标并保存…';
   saveStatus.style.color = 'var(--muted)';
-  
+
   try {
     // Add timeout wrapper
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout
-    
+
     const resp = await fetch(api('/api/cdi-prbf/save'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: USERNAME }),
+      body: JSON.stringify({ username: USERNAME, sub_type: testMode }),
       signal: controller.signal
     });
-    
+
     clearTimeout(timeoutId);
     const data = await resp.json();
-    
+
     if (data.ok) {
       saveStatus.textContent = `已保存: ${data.file}`;
       saveStatus.style.color = 'var(--green)';
@@ -1040,7 +1234,7 @@ async function saveResults() {
     saveStatus.style.color = 'var(--red)';
     btn.textContent = originalText;
   }
-  
+
   btn.disabled = false;
 }
 
@@ -1067,9 +1261,13 @@ function connectSSE() {
   es.onmessage = (ev) => {
     const data = JSON.parse(ev.data);
     const { bpm, hrv_rmssd, lf_power } = data;
-    
+
     if (bpm > 0) {
       bpmValue.textContent = bpm.toFixed(1);
+      lastBpmFromSSE = bpm;
+      // Update baseline BPM display too
+      const baselineBpmEl = document.getElementById('baseline-bpm-value');
+      if (baselineBpmEl) baselineBpmEl.textContent = bpm.toFixed(1);
       connPill.className = 'pill pill-connected';
       connPill.textContent = 'Live ♥';
     }
@@ -1109,14 +1307,35 @@ document.getElementById('restart-btn').addEventListener('click', () => {
   void restartTest();
 });
 
-// Ratio buttons
-document.querySelectorAll('.ratio-btn').forEach(btn => {
+// Ratio buttons (only applies to control_group mode)
+document.querySelectorAll('#start-screen .ratio-btn').forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.ratio-btn').forEach(b => b.classList.remove('active'));
+    if (btn.dataset.mode !== undefined) return; // Skip mode buttons
+    document.querySelectorAll('#start-screen .ratio-btn').forEach(b => {
+      if (b.dataset.mode === undefined) b.classList.remove('active');
+    });
     btn.classList.add('active');
     inhaleRatio = parseInt(btn.dataset.inhale);
     exhaleRatio = parseInt(btn.dataset.exhale);
   });
+});
+
+// Mode selector buttons
+document.querySelectorAll('#mode-select .ratio-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#mode-select .ratio-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    testMode = btn.dataset.mode;
+    // Show/hide baseline duration input
+    document.getElementById('baseline-duration-group').style.display =
+      testMode === 'baseline' ? '' : 'none';
+  });
+});
+
+// Baseline duration input
+document.getElementById('baseline-duration').addEventListener('change', function() {
+  baselineDuration = Math.max(1, Math.min(30, parseInt(this.value) || 6));
+  this.value = baselineDuration;
 });
 
 // BLE relay buttons

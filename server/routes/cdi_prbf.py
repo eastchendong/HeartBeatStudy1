@@ -69,6 +69,7 @@ def configure():
     data = request.get_json(silent=True) or {}
     
     cdi_config = {
+        "mode": data.get("mode", "control_group"),  # "baseline" or "control_group"
         "frequencies": CDI_FREQUENCIES,
         "cycles_per_frequency": data.get("cycles_per_frequency", CYCLES_PER_FREQUENCY),
         "inhale_ratio": data.get("inhale_ratio", 5),
@@ -80,6 +81,7 @@ def configure():
         "test_active": False,
         "test_complete": False,
         "username": data.get("username", ""),
+        "duration": data.get("duration", 360),  # baseline only, default 6 min
     }
     
     with sess.lock:
@@ -96,26 +98,22 @@ def configure():
 
 @cdi_prbf_bp.route("/api/cdi-prbf/start", methods=["POST"])
 def start_test():
-    """Start CDI PRBF test."""
+    """Start CDI PRBF test (baseline or control_group)."""
     sess = get_current_session()
-    
+
     with sess.lock:
         cdi_config = sess.session_config.get("cdi_prbf", {})
         if not cdi_config:
             return jsonify({"error": "Not configured"}), 400
-        
+
+        mode = cdi_config.get("mode", "control_group")
         cdi_config["test_active"] = True
         cdi_config["current_stage"] = 0
         cdi_config["current_cycle"] = 0
         cdi_config["stage_results"] = []
         cdi_config["stage_data"] = []
         cdi_config["test_complete"] = False
-        
-        # Set initial breathing cycle for first frequency
-        first_freq = CDI_FREQUENCIES[0]
-        cycle = 60.0 / first_freq
-        sess.session_config["breath_cycle"] = cycle
-        sess.breath_cycle = cycle
+
         sess.session_active = True
         sess.session_start = time.time()
         sess.bpm_window.clear()
@@ -126,15 +124,32 @@ def start_test():
         sess.latest_rmssd = None
         sess.latest_lf_power = None
         sess.latest_bpm = 0.0
-    
-    return jsonify({
-        "ok": True,
-        "current_stage": 0,
-        "frequency": CDI_FREQUENCIES[0],
-        "cycle": 60.0 / CDI_FREQUENCIES[0],
-        "total_stages": len(CDI_FREQUENCIES),
-        "cycles_per_frequency": cdi_config.get("cycles_per_frequency", CYCLES_PER_FREQUENCY),
-    })
+        sess.current_cycle_rr.clear()
+        sess.cycle_rr_list.clear()
+
+        if mode == "baseline":
+            # Baseline: no breath cycle needed
+            duration = cdi_config.get("duration", 360)
+            return jsonify({
+                "ok": True,
+                "mode": "baseline",
+                "duration": duration,
+            })
+        else:
+            # Control group: set up breathing cycle
+            first_freq = CDI_FREQUENCIES[0]
+            cycle = 60.0 / first_freq
+            sess.session_config["breath_cycle"] = cycle
+            sess.breath_cycle = cycle
+            return jsonify({
+                "ok": True,
+                "mode": "control_group",
+                "current_stage": 0,
+                "frequency": CDI_FREQUENCIES[0],
+                "cycle": cycle,
+                "total_stages": len(CDI_FREQUENCIES),
+                "cycles_per_frequency": cdi_config.get("cycles_per_frequency", CYCLES_PER_FREQUENCY),
+            })
 
 
 @cdi_prbf_bp.route("/api/cdi-prbf/on-cycle-complete", methods=["POST"])
@@ -336,89 +351,124 @@ def get_results():
         })
 
 
+@cdi_prbf_bp.route("/api/cdi-prbf/on-baseline-complete", methods=["POST"])
+def baseline_complete():
+    """Mark baseline test as complete (called by frontend timer)."""
+    sess = get_current_session()
+
+    with sess.lock:
+        cdi_config = sess.session_config.get("cdi_prbf", {})
+        if not cdi_config.get("test_active"):
+            return jsonify({"error": "Test not active"}), 400
+
+        cdi_config["test_active"] = False
+        cdi_config["test_complete"] = True
+        sess.session_active = False
+
+    return jsonify({"ok": True})
+
+
 @cdi_prbf_bp.route("/api/cdi-prbf/save", methods=["POST"])
 def save_results():
-    """Save CDI PRBF test results - one file per cycle."""
+    """Save CDI PRBF test results - handles both baseline and control_group modes."""
     import uuid
     from datetime import datetime, timezone
-    
+
     sess = get_current_session()
     data = request.get_json(silent=True) or {}
     username = data.get("username", "") or sess.session_config.get("username", "") or "anonymous"
-    
+    sub_type = data.get("sub_type", "control_group")
+
     with sess.lock:
         cdi_config = sess.session_config.get("cdi_prbf", {})
         if not cdi_config:
             return jsonify({"error": "No test data"}), 400
-        
-        stage_data = cdi_config.get("stage_data", [])
-        stage_results = cdi_config.get("stage_results", [])
-        best_result = cdi_config.get("best_result")
-        
-        # Get cycle RR intervals
-        cycle_rr_list = list(sess.cycle_rr_list)
-        
-        # Group stage_data by stage (3 cycles per stage)
-        cycles_per_freq = cdi_config.get("cycles_per_frequency", CYCLES_PER_FREQUENCY)
-        
-        # Get all BPM readings
+
+        mode = cdi_config.get("mode", "control_group")
         bpm_all = list(sess.bpm_all)
-        
-        # Calculate BPM per cycle (approximate - divide evenly)
-        bpm_per_cycle = []
-        if bpm_all and len(cycle_rr_list) > 0:
-            bpm_per_cycle = bpm_all
-        
-        # Build per-cycle data
-        cycles = []
-        for i, rr_cycle in enumerate(cycle_rr_list):
-            stage_idx = i // cycles_per_freq
-            cycle_in_stage = (i % cycles_per_freq) + 1
-            
-            # Find corresponding stage_data for this cycle
-            cycle_data = None
-            for sd in stage_data:
-                if sd.get("cycle") == cycle_in_stage:
-                    # Need to find the right one - stage_data is per-stage
-                    pass
-            
-            cycles.append({
-                "cycle_number": i + 1,
-                "stage": stage_idx + 1,
-                "frequency": CDI_FREQUENCIES[stage_idx] if stage_idx < len(CDI_FREQUENCIES) else None,
-                "cycle_duration": 60.0 / CDI_FREQUENCIES[stage_idx] if stage_idx < len(CDI_FREQUENCIES) else None,
-                "rr_intervals": rr_cycle,
-                "rr_count": len(rr_cycle),
-            })
-        
-        # Create session record
-        session_record = {
-            "id": str(uuid.uuid4()),
-            "session_id": sess.session_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "username": username,
-            "training_type": "cdi_prbf",
-            "config": {
-                "frequencies": CDI_FREQUENCIES,
-                "cycles_per_frequency": cycles_per_freq,
-                "total_cycles": len(cycle_rr_list),
-            },
-            "cycles": cycles,
-            "stage_results": stage_results,
-            "best_result": best_result,
-            "all_bpm": bpm_all,
-            "bpm_avg": sum(bpm_all) / len(bpm_all) if bpm_all else None,
-            "bpm_max": max(bpm_all) if bpm_all else None,
-            "bpm_min": min(bpm_all) if bpm_all else None,
-        }
-        
+        rr_data = list(sess.rr_intervals)
+        rr_ts_data = list(sess.rr_timestamps)
+
+        # Compute HRV metrics
+        final_rmssd = compute_rmssd(rr_data)
+        final_lf = compute_lf_power(rr_data)
+
+        if mode == "baseline":
+            # Baseline: flat format like main sessions (RR intervals + timestamps)
+            session_record = {
+                "id": str(uuid.uuid4()),
+                "session_id": sess.session_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "username": username,
+                "training_type": "cdi_prbf",
+                "sub_type": "baseline",
+                "tag": "同济设创数据",
+                "config": {
+                    "mode": "baseline",
+                    "duration": cdi_config.get("duration", 360),
+                },
+                "rr_intervals_ms": rr_data,
+                "rr_timestamps": rr_ts_data,
+                "rr_count": len(rr_data),
+                "bpm_readings": bpm_all,
+                "bpm_max": round(max(bpm_all), 1) if bpm_all else None,
+                "bpm_min": round(min(bpm_all), 1) if bpm_all else None,
+                "bpm_avg": round(sum(bpm_all) / len(bpm_all), 1) if bpm_all else None,
+                "hrv_rmssd": round(final_rmssd, 2) if final_rmssd is not None else None,
+                "lf_power": round(final_lf, 4) if final_lf is not None else None,
+            }
+        else:
+            # Control group: existing cycle/stage structure
+            stage_data = cdi_config.get("stage_data", [])
+            stage_results = cdi_config.get("stage_results", [])
+            best_result = cdi_config.get("best_result")
+            cycle_rr_list = list(sess.cycle_rr_list)
+            cycles_per_freq = cdi_config.get("cycles_per_frequency", CYCLES_PER_FREQUENCY)
+
+            # Build per-cycle data
+            cycles = []
+            for i, rr_cycle in enumerate(cycle_rr_list):
+                stage_idx = i // cycles_per_freq
+                cycles.append({
+                    "cycle_number": i + 1,
+                    "stage": stage_idx + 1,
+                    "frequency": CDI_FREQUENCIES[stage_idx] if stage_idx < len(CDI_FREQUENCIES) else None,
+                    "cycle_duration": 60.0 / CDI_FREQUENCIES[stage_idx] if stage_idx < len(CDI_FREQUENCIES) else None,
+                    "rr_intervals": rr_cycle,
+                    "rr_count": len(rr_cycle),
+                })
+
+            session_record = {
+                "id": str(uuid.uuid4()),
+                "session_id": sess.session_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "username": username,
+                "training_type": "cdi_prbf",
+                "sub_type": "control_group",
+                "tag": "同济设创数据",
+                "config": {
+                    "frequencies": CDI_FREQUENCIES,
+                    "cycles_per_frequency": cycles_per_freq,
+                    "total_cycles": len(cycle_rr_list),
+                },
+                "cycles": cycles,
+                "stage_results": stage_results,
+                "best_result": best_result,
+                "all_bpm": bpm_all,
+                "bpm_avg": sum(bpm_all) / len(bpm_all) if bpm_all else None,
+                "bpm_max": max(bpm_all) if bpm_all else None,
+                "bpm_min": min(bpm_all) if bpm_all else None,
+                "hrv_rmssd": round(final_rmssd, 2) if final_rmssd is not None else None,
+                "lf_power": round(final_lf, 4) if final_lf is not None else None,
+            }
+
         # Save to file
         filename = f"cdi_prbf_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{session_record['id'][:8]}.json"
         filepath = state.DATA_DIR / filename
         import json as json_mod
         with open(filepath, "w", encoding="utf-8") as f:
             json_mod.dump(session_record, f, ensure_ascii=False, indent=2)
-        
+
         # Mirror to shared dir if configured
         mirrored_to = None
         if state.SHARED_DATA_DIR is not None:
@@ -426,22 +476,23 @@ def save_results():
             import shutil
             shutil.copy2(filepath, shared_file)
             mirrored_to = str(shared_file)
-        
+
         # Clear cycle data to prevent duplicate saves
         sess.cycle_rr_list.clear()
         sess.current_cycle_rr.clear()
-        
+
         # Reset test state
         cdi_config["test_active"] = False
-        
+
         return jsonify({
             "ok": True,
             "file": str(filepath.name),
             "mirrored_to": mirrored_to,
             "summary": {
-                "total_cycles": len(cycle_rr_list),
-                "total_stages": len(stage_results),
+                "mode": mode,
+                "total_cycles": len(cycle_rr_list) if mode != "baseline" else 0,
+                "total_stages": len(stage_results) if mode != "baseline" else 0,
                 "bpm_avg": session_record["bpm_avg"],
-                "best_frequency": best_result.get("frequency") if best_result else None,
+                "best_frequency": best_result.get("frequency") if mode != "baseline" and best_result else None,
             },
         })

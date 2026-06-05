@@ -34,8 +34,16 @@ def load_session_data(filepath: Path) -> Optional[Dict[str, Any]]:
 
 
 def detect_training_type(data: Dict[str, Any]) -> str:
-    """Detect training type from session data."""
-    # Check for Buteyko-specific fields
+    """Detect training type from session data. CDI PRBF is split by sub_type."""
+    explicit_type = data.get("training_type", "")
+    if explicit_type == "cdi_prbf":
+        sub = data.get("sub_type", "")
+        if sub == "baseline":
+            return "cdi_prbf_baseline"
+        return "cdi_prbf_control_group"
+    if explicit_type == "buteyko":
+        return "buteyko"
+    # Check for Buteyko-specific fields (legacy)
     if "bolt_seconds" in data or "round_results" in data or "buteyko_config" in data:
         return "buteyko"
     # Check for PRBF/adaptive experiment
@@ -61,6 +69,10 @@ def get_session_info(filepath: Path) -> Optional[Dict[str, Any]]:
     stat = filepath.stat()
     training_type = detect_training_type(data)
     
+    # Handle CDI PRBF data that uses "all_bpm" instead of "bpm_readings"
+    bpm_readings = data.get("bpm_readings") or data.get("all_bpm", [])
+    rr_count = data.get("rr_count") or len(data.get("rr_intervals_ms", []) or data.get("rr_intervals", []))
+
     return {
         "filename": filepath.name,
         "id": data.get("id", ""),
@@ -76,13 +88,18 @@ def get_session_info(filepath: Path) -> Optional[Dict[str, Any]]:
         "bpm_max": data.get("bpm_max"),
         "hrv_rmssd": data.get("hrv_rmssd"),
         "lf_power": data.get("lf_power"),
-        "rr_count": data.get("rr_count", 0),
+        "rr_count": rr_count,
+        "bpm_readings": bpm_readings,
+        "tag": data.get("tag", ""),
+        "sub_type": data.get("sub_type", ""),
     }
 
 
 def get_training_type_label(training_type: str) -> str:
     """Get human-readable label for training type."""
     labels = {
+        "cdi_prbf_control_group": "CDI共振呼吸测试 - 视觉引导",
+        "cdi_prbf_baseline": "CDI共振呼吸测试 - 基线测试",
         "buteyko": "布捷伊科屏气",
         "prbf": "个体共振频率 (PRBF)",
         "fast_resonance": "快速共振呼吸",
@@ -111,8 +128,10 @@ def list_sessions():
     sort_order = request.args.get("sort_order", "desc")
     limit = request.args.get("limit", 100, type=int)
     
-    # Load all sessions
+    # Load all sessions (main, CDI PRBF, and Buteyko)
     files = list(state.DATA_DIR.glob("session_*.json"))
+    files.extend(state.DATA_DIR.glob("cdi_prbf_*.json"))
+    files.extend(state.DATA_DIR.glob("buteyko_*.json"))
     sessions = []
     for f in files:
         info = get_session_info(f)
@@ -125,7 +144,7 @@ def list_sessions():
     
     if training_type_filter:
         sessions = [s for s in sessions if s["training_type"] == training_type_filter]
-    
+
     # Sort
     sort_key_map = {
         "date": "timestamp",
@@ -163,6 +182,8 @@ def list_sessions():
             "order": sort_order,
         },
         "training_types": [
+            {"value": "cdi_prbf_control_group", "label": "CDI共振呼吸测试 - 视觉引导"},
+            {"value": "cdi_prbf_baseline", "label": "CDI共振呼吸测试 - 基线测试"},
             {"value": "buteyko", "label": "布捷伊科屏气"},
             {"value": "prbf", "label": "个体共振频率 (PRBF)"},
             {"value": "fast_resonance", "label": "快速共振呼吸"},
@@ -211,6 +232,8 @@ def download_zip():
         training_type_filter = data.get("training_type", "").strip()
         
         files = list(state.DATA_DIR.glob("session_*.json"))
+        files.extend(state.DATA_DIR.glob("cdi_prbf_*.json"))
+        files.extend(state.DATA_DIR.glob("buteyko_*.json"))
         for f in files:
             info = get_session_info(f)
             if not info:
@@ -220,10 +243,10 @@ def download_zip():
             if training_type_filter and info["training_type"] != training_type_filter:
                 continue
             filenames.append(info["filename"])
-    
+
     if not filenames:
         return jsonify({"ok": False, "error": "No files selected"}), 400
-    
+
     # Create ZIP in memory
     memory_file = io.BytesIO()
     with zipfile.ZipFile(memory_file, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -251,7 +274,9 @@ def download_zip():
 def get_stats():
     """Get overall statistics about stored sessions."""
     files = list(state.DATA_DIR.glob("session_*.json"))
-    
+    files.extend(state.DATA_DIR.glob("cdi_prbf_*.json"))
+    files.extend(state.DATA_DIR.glob("buteyko_*.json"))
+
     total_files = len(files)
     total_size = sum(f.stat().st_size for f in files)
     usernames = set()
@@ -486,6 +511,8 @@ def export_zip():
         training_type_filter = body.get("training_type", "").strip()
 
         files = list(state.DATA_DIR.glob("session_*.json"))
+        files.extend(state.DATA_DIR.glob("cdi_prbf_*.json"))
+        files.extend(state.DATA_DIR.glob("buteyko_*.json"))
         for f in files:
             info = get_session_info(f)
             if not info:

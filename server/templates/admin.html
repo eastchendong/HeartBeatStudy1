@@ -324,7 +324,9 @@
   .type-resonance { color: var(--green); border-color: var(--green); }
   .type-fast_resonance { color: #a371f7; border-color: #a371f7; }
   .type-slow_resonance { color: #3fb950; border-color: #3fb950; }
-  
+  .type-cdi_prbf_control_group { color: #f778ba; border-color: #f778ba; }
+  .type-cdi_prbf_baseline { color: #f778ba; border-color: #f778ba; }
+
   .cell-number {
     font-variant-numeric: tabular-nums;
     text-align: right;
@@ -646,6 +648,7 @@
           <th class="sortable" data-sort="date">日期时间</th>
           <th class="sortable" data-sort="username">用户名</th>
           <th class="sortable" data-sort="type">训练类型</th>
+          <th>标签</th>
           <th class="sortable" data-sort="bpm_avg">平均心率</th>
           <th class="sortable" data-sort="hrv_rmssd">HRV</th>
           <th>RR数量</th>
@@ -653,7 +656,7 @@
         </tr>
       </thead>
       <tbody id="table-body">
-        <tr><td colspan="8" class="loading"><span class="spinner"></span>加载中...</td></tr>
+        <tr><td colspan="9" class="loading"><span class="spinner"></span>加载中...</td></tr>
       </tbody>
     </table>
   </div>
@@ -712,14 +715,14 @@ async function loadStats() {
 // Load sessions
 async function loadSessions() {
   const tbody = document.getElementById('table-body');
-  tbody.innerHTML = '<tr><td colspan="8" class="loading"><span class="spinner"></span>加载中...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="9" class="loading"><span class="spinner"></span>加载中...</td></tr>';
   
   const params = new URLSearchParams();
   const username = document.getElementById('filter-username').value.trim();
   const type = document.getElementById('filter-type').value;
   const sortBy = document.getElementById('sort-by').value;
   const sortOrder = document.getElementById('sort-order').value;
-  
+
   if (username) params.append('username', username);
   if (type) params.append('training_type', type);
   params.append('sort_by', sortBy);
@@ -737,10 +740,10 @@ async function loadSessions() {
       renderTable();
       updateStats();
     } else {
-      tbody.innerHTML = `<tr><td colspan="8" class="empty-state">加载失败: ${data.error}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="9" class="empty-state">加载失败: ${data.error}</td></tr>`;
     }
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="8" class="empty-state">加载失败，请重试</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" class="empty-state">加载失败，请重试</td></tr>`;
   }
 }
 
@@ -766,7 +769,7 @@ function renderTable() {
   if (sessions.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="8" class="empty-state">
+        <td colspan="9" class="empty-state">
           <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
             <polyline points="14 2 14 8 20 8"/>
@@ -791,6 +794,7 @@ function renderTable() {
       <td>${formatDate(s.timestamp)}</td>
       <td class="cell-username">${escapeHtml(s.username)}</td>
       <td><span class="cell-type type-${s.training_type}">${s.training_type_label}</span></td>
+      <td style="font-size:0.8rem;color:var(--muted)">${s.tag || '--'}</td>
       <td class="cell-number">${s.bpm_avg != null ? s.bpm_avg.toFixed(1) : '--'}</td>
       <td class="cell-number">${s.hrv_rmssd != null ? s.hrv_rmssd.toFixed(1) : '--'}</td>
       <td class="cell-number">${s.rr_count || 0}</td>
