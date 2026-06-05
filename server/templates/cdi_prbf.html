@@ -596,6 +596,11 @@
       <input type="number" id="test-duration" value="6" min="1" max="30" step="1" />
     </div>
 
+    <div class="form-group" id="lf-threshold-group" style="display:none">
+      <label>LF Power 激励阈值 (ms²)</label>
+      <input type="number" id="lf-threshold" value="500" min="100" max="2000" step="50" />
+    </div>
+
     <button id="start-btn">开始测试</button>
   </div>
 </div>
@@ -667,6 +672,11 @@
       <div class="label">已采集心率</div>
       <div class="value" id="baseline-bpm-value" style="color:var(--red)">--</div>
       <div class="unit">BPM</div>
+    </div>
+    <div class="info-item" id="coherence-info" style="display:none">
+      <div class="label">Coherence</div>
+      <div class="value" id="coherence-score" style="color:var(--accent)">--</div>
+      <div class="unit">0–1</div>
     </div>
     <div class="info-item" id="blossom-info" style="display:none">
       <div class="label">激励次数</div>
@@ -1084,6 +1094,7 @@ async function startFindPrbfTest() {
 
   // Show find_prbf elements
   document.getElementById('baseline-timer-bar').style.display = 'none';
+  document.getElementById('coherence-info').style.display = 'none';
   document.getElementById('blossom-info').style.display = 'none';
   document.getElementById('circle-wrap').style.display = '';
   document.querySelector('.stages-container').style.display = '';
@@ -1099,11 +1110,12 @@ async function startFindPrbfTest() {
 // ── Control Group: fixed 0.1 Hz, coherence colors ─────────────────────────
 async function startControlGroupTest() {
   const durationSec = testDuration * 60;
+  const lfThreshold = parseInt(document.getElementById('lf-threshold').value) || 500;
   coherenceTracker = new window.RSACoherenceTracker();
 
-  // Init blossom effect
+  // Init blossom effect with custom threshold
   const particleCanvas = document.getElementById('particle-canvas');
-  blossomEffect = new window.LFBlossomEffect(particleCanvas);
+  blossomEffect = new window.LFBlossomEffect(particleCanvas, { threshold: lfThreshold });
   blossomEffect.startSession();
 
   // Init time-series data collection
@@ -1154,6 +1166,7 @@ async function startControlGroupTest() {
 
   // Show breathing circle, hide stages, show timer
   document.getElementById('baseline-timer-bar').style.display = 'flex';
+  document.getElementById('coherence-info').style.display = '';
   document.getElementById('blossom-info').style.display = '';
   document.getElementById('circle-wrap').style.display = '';
   document.querySelector('.stages-container').style.display = 'none';
@@ -1165,7 +1178,6 @@ async function startControlGroupTest() {
 }
 
 function updateBlossomUI(result) {
-  // Update blossom-related UI if needed (e.g., progress counter)
   const blossomEl = document.getElementById('blossom-count');
   if (blossomEl) {
     blossomEl.textContent = `${result.count}/5`;
@@ -1175,7 +1187,41 @@ function updateBlossomUI(result) {
 // ── Baseline: no visual guidance ──────────────────────────────────────────
 async function startBaselineTest() {
   const durationSec = testDuration * 60;
-  coherenceTracker = null;
+  const lfThreshold = parseInt(document.getElementById('lf-threshold').value) || 500;
+
+  // Init coherence tracker with virtual 0.1 Hz reference (no visual guidance)
+  coherenceTracker = new window.RSACoherenceTracker();
+  lastLfFromSSE = null;
+
+  // Init blossom with custom threshold
+  const particleCanvas = document.getElementById('particle-canvas');
+  blossomEffect = new window.LFBlossomEffect(particleCanvas, { threshold: lfThreshold });
+  blossomEffect.startSession();
+
+  // Time-series data collection
+  const sessionStartTs = performance.now() / 1000;
+  controlGroupData = { bpm: [], lf: [], coherence: [], timestamps: [] };
+
+  // Record data + blossom + coherence every 1s
+  blossomInterval = setInterval(() => {
+    const elapsed = Math.round(performance.now() / 1000 - sessionStartTs);
+    controlGroupData.timestamps.push(elapsed);
+    controlGroupData.bpm.push(lastBpmFromSSE || 0);
+    controlGroupData.lf.push(lastLfFromSSE || 0);
+    // Coherence: use virtual 0.1 Hz sine wave as reference
+    if (coherenceTracker && lastBpmFromSSE > 0) {
+      const virtualPhase = (elapsed * 0.1) % 1; // 0.1 Hz virtual breathing phase
+      coherenceTracker.update(lastBpmFromSSE, performance.now() / 1000, virtualPhase, 0.1);
+      controlGroupData.coherence.push(coherenceTracker.smoothedCoherence);
+      document.getElementById('coherence-score').textContent = coherenceTracker.smoothedCoherence.toFixed(3);
+    } else {
+      controlGroupData.coherence.push(0);
+    }
+    if (blossomEffect && lastLfFromSSE !== null) {
+      const result = blossomEffect.update(lastLfFromSSE);
+      updateBlossomUI(result);
+    }
+  }, 1000);
 
   await fetch(api('/api/cdi-prbf/configure'), {
     method: 'POST',
@@ -1194,9 +1240,10 @@ async function startBaselineTest() {
   testState.isRunning = true;
   showScreen('test');
 
-  // Show timer only, hide everything else
+  // Show timer + coherence + blossom, hide breathing circle
   document.getElementById('baseline-timer-bar').style.display = 'flex';
-  document.getElementById('blossom-info').style.display = 'none';
+  document.getElementById('coherence-info').style.display = '';
+  document.getElementById('blossom-info').style.display = '';
   document.getElementById('circle-wrap').style.display = 'none';
   document.querySelector('.stages-container').style.display = 'none';
   document.querySelectorAll('.info-bar')[0].style.display = 'none';
@@ -1313,40 +1360,8 @@ async function showResults() {
 }
 
 function showTimerResults() {
-  if (testMode === 'control_group') {
-    showControlGroupResults();
-  } else {
-    showBaselineSummary();
-  }
-}
-
-function showBaselineSummary() {
-  document.querySelector('.result-card.best-result').style.display = '';
-  document.querySelectorAll('.result-card')[1].style.display = 'none';
-  document.getElementById('results-stats').innerHTML = '';
-  document.getElementById('results-charts').innerHTML = '';
-
-  const mins = Math.floor(testDuration);
-  const durText = `${mins}分钟`;
-  const currentBpm = lastBpmFromSSE > 0 ? lastBpmFromSSE.toFixed(1) : '--';
-  const currentRmssd = document.getElementById('rmssd-value').textContent;
-  const currentLf = document.getElementById('lf-value').textContent;
-
-  document.getElementById('results-title').textContent = '测试结果';
-  document.getElementById('best-freq').textContent = durText;
-  document.getElementById('best-freq-label').textContent = '时长';
-  document.getElementById('best-cycle').textContent = 'Baseline (无视觉引导)';
-  document.getElementById('best-cycle-label').textContent = '模式';
-
-  document.getElementById('results-body').innerHTML = `
-    <tr><td colspan="2">模式</td><td colspan="4">Baseline (无视觉引导)</td></tr>
-    <tr><td colspan="2">时长</td><td colspan="4">${durText}</td></tr>
-    <tr><td colspan="2">实时心率</td><td colspan="4">${currentBpm} BPM</td></tr>
-    <tr><td colspan="2">HRV RMSSD</td><td colspan="4">${currentRmssd} ms</td></tr>
-    <tr><td colspan="2">LF Power</td><td colspan="4">${currentLf} ms²</td></tr>
-  `;
-
-  showScreen('results');
+  // Both control_group and baseline get chart-based results
+  showControlGroupResults();
 }
 
 function showControlGroupResults() {
@@ -1365,9 +1380,10 @@ function showControlGroupResults() {
   document.querySelectorAll('.result-card')[1].style.display = '';
 
   // Update best-result card
-  document.getElementById('results-title').textContent = 'Control Group 测试结果';
-  document.getElementById('best-freq').textContent = '0.1 Hz 共振呼吸';
-  document.getElementById('best-freq-label').textContent = '固定频率';
+  const isBaseline = testMode === 'baseline';
+  document.getElementById('results-title').textContent = isBaseline ? 'Baseline 测试结果' : 'Control Group 测试结果';
+  document.getElementById('best-freq').textContent = isBaseline ? '无视觉引导' : '0.1 Hz 共振呼吸';
+  document.getElementById('best-freq-label').textContent = isBaseline ? '模式' : '固定频率';
   document.getElementById('best-cycle').textContent = `${testDuration} 分钟`;
   document.getElementById('best-cycle-label').textContent = '测试时长';
 
@@ -1628,9 +1644,10 @@ document.querySelectorAll('#mode-select .ratio-btn').forEach(btn => {
     document.querySelectorAll('#mode-select .ratio-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     testMode = btn.dataset.mode;
-    // Show duration input for control_group and baseline, hide for find_prbf
-    const showDuration = (testMode === 'control_group' || testMode === 'baseline');
-    document.getElementById('duration-group').style.display = showDuration ? '' : 'none';
+    // Show duration + LF threshold for control_group and baseline
+    const showTimerOpts = (testMode === 'control_group' || testMode === 'baseline');
+    document.getElementById('duration-group').style.display = showTimerOpts ? '' : 'none';
+    document.getElementById('lf-threshold-group').style.display = showTimerOpts ? '' : 'none';
     // Show/hide ratio selector (only for find_prbf)
     const ratioEls = document.querySelectorAll('#start-screen .ratio-btn');
     ratioEls.forEach(b => {

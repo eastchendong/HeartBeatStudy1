@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const CONFIG = {
+  const DEFAULT_CONFIG = {
     threshold: 500,            // LF Power threshold (ms^2)
     requiredStreak: 3,         // consecutive good readings
     cooldown: 120,             // seconds between blossoms
@@ -25,11 +25,13 @@
   };
 
   class LFBlossomEffect {
-    constructor(canvasEl) {
+    constructor(canvasEl, opts) {
+      opts = opts || {};
       this.canvas = canvasEl;
       this.ctx = canvasEl.getContext('2d');
       this.particles = [];
       this.running = false;
+      this.config = Object.assign({}, DEFAULT_CONFIG, opts);
       this.reset();
     }
 
@@ -67,14 +69,14 @@
       this.sessionTime = performance.now() / 1000 - this.sessionStart;
 
       // Check if can still blossom
-      const canBlossom = this.blossomCount < CONFIG.maxBlossoms &&
-        (this.sessionTime - this.lastBlossomTime) >= CONFIG.cooldown;
+      const canBlossom = this.blossomCount < this.config.maxBlossoms &&
+        (this.sessionTime - this.lastBlossomTime) >= this.config.cooldown;
 
       let triggered = false;
 
-      if (canBlossom && lfPower !== null && lfPower >= CONFIG.threshold) {
+      if (canBlossom && lfPower !== null && lfPower >= this.config.threshold) {
         this.goodStreak++;
-        if (this.goodStreak >= CONFIG.requiredStreak) {
+        if (this.goodStreak >= this.config.requiredStreak) {
           // Stability delay (0.5s in Unity, instant here since we check at 1s)
           this._triggerBlossom();
           triggered = true;
@@ -101,13 +103,13 @@
     }
 
     _updateProgress(lfPower) {
-      if (this.blossomCount >= CONFIG.maxBlossoms) {
+      if (this.blossomCount >= this.config.maxBlossoms) {
         this.progress = 1;
         return;
       }
       const elapsed = this.sessionTime - this.lastBlossomTime;
-      const cooldownRatio = Math.min(1, Math.max(0, elapsed / CONFIG.cooldown));
-      const powerRatio = Math.min(1, Math.max(0, lfPower / (CONFIG.threshold * 2)));
+      const cooldownRatio = Math.min(1, Math.max(0, elapsed / this.config.cooldown));
+      const powerRatio = Math.min(1, Math.max(0, lfPower / (this.config.threshold * 2)));
       // Combined: time-dependent + LF-dependent
       this.progress = cooldownRatio * (0.5 + 0.5 * powerRatio);
     }
