@@ -698,6 +698,33 @@
   </div>
 
   <button id="stop-btn">停止测试</button>
+
+  <!-- Debug panel (control_group only) -->
+  <div id="debug-panel" style="display:none;width:min(400px,90vw);background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1rem;margin-top:0.5rem">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+      <span style="font-size:0.8rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em">Debug Panel</span>
+      <button onclick="document.getElementById('debug-panel').style.display='none'" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:1.2rem">&times;</button>
+    </div>
+    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center">
+      <span style="font-size:0.75rem;color:var(--muted)">颜色等级:</span>
+      <button class="debug-btn" onclick="debugForceColor(0)" style="background:#fff;color:#333">0 白</button>
+      <button class="debug-btn" onclick="debugForceColor(1)" style="background:rgb(179,217,255);color:#333">1 浅蓝</button>
+      <button class="debug-btn" onclick="debugForceColor(2)" style="background:rgb(102,179,255);color:#fff">2 天蓝</button>
+      <button class="debug-btn" onclick="debugForceColor(3)" style="background:rgb(26,128,230);color:#fff">3 深蓝</button>
+      <button class="debug-btn" onclick="debugResetColor()" style="background:var(--bg);color:var(--text);border:1px solid var(--border)">恢复自动</button>
+    </div>
+    <div style="display:flex;gap:0.5rem;margin-top:0.6rem;align-items:center">
+      <button class="debug-btn" onclick="debugTriggerBlossom()" style="background:var(--accent);color:#fff;font-weight:600">触发激励粒子</button>
+      <span style="font-size:0.7rem;color:var(--muted)">
+        Coherence: <span id="debug-coherence-val">--</span> |
+        LF: <span id="debug-lf-val">--</span>
+      </span>
+    </div>
+  </div>
+  <style>
+    .debug-btn { padding:0.3em 0.7em;border-radius:6px;border:1px solid var(--border);cursor:pointer;font-size:0.75rem;font-weight:500;transition:opacity 0.15s }
+    .debug-btn:hover { opacity:0.8 }
+  </style>
 </div>
 
 <!-- ═══════════════════ RESULTS SCREEN ═══════════════════ -->
@@ -914,16 +941,29 @@ function updateCycleIndicators() {
 // ═══════════════════════════════════════════════════════════════════════════
 const SCALE = { inhale: 1.42, exhale: 0.72 };
 
+const DEBUG_COLORS = [
+  'rgb(255, 255, 255)',
+  'rgb(179, 217, 255)',
+  'rgb(102, 179, 255)',
+  'rgb(26, 128, 230)',
+];
+
 function applyCoherenceColor() {
-  // Control group mode: coherence-based color (0.1 Hz = 6 bpm)
-  const freqHz = 6.0 / 60; // 0.1 Hz
-  const result = coherenceTracker.update(
-    lastBpmFromSSE || 0,
-    performance.now() / 1000,
-    testState._animPhase || 0,
-    freqHz
-  );
-  const c = result.color;
+  let c;
+  if (debugForceColorLevel >= 0) {
+    // Debug: force specific color level
+    c = DEBUG_COLORS[debugForceColorLevel];
+  } else {
+    // Normal: coherence-based color (0.1 Hz = 6 bpm)
+    const freqHz = 6.0 / 60;
+    const result = coherenceTracker.update(
+      lastBpmFromSSE || 0,
+      performance.now() / 1000,
+      testState._animPhase || 0,
+      freqHz
+    );
+    c = result.color;
+  }
   breathCircle.style.setProperty('--circle-color', c);
   breathCircle.style.background = `radial-gradient(circle at 35% 35%, ${c}, #1a2433)`;
   breathCircle.style.boxShadow = `0 0 40px 6px ${c}`;
@@ -1096,6 +1136,7 @@ async function startFindPrbfTest() {
   document.getElementById('baseline-timer-bar').style.display = 'none';
   document.getElementById('coherence-info').style.display = 'none';
   document.getElementById('blossom-info').style.display = 'none';
+  document.getElementById('debug-panel').style.display = 'none';
   document.getElementById('circle-wrap').style.display = '';
   document.querySelector('.stages-container').style.display = '';
   document.querySelectorAll('.info-bar')[0].style.display = '';
@@ -1131,6 +1172,13 @@ async function startControlGroupTest() {
     controlGroupData.coherence.push(
       coherenceTracker ? coherenceTracker.smoothedCoherence : 0
     );
+    // Update coherence + debug display
+    if (coherenceTracker) {
+      const coh = coherenceTracker.smoothedCoherence.toFixed(3);
+      document.getElementById('coherence-score').textContent = coh;
+      document.getElementById('debug-coherence-val').textContent = coh;
+    }
+    document.getElementById('debug-lf-val').textContent = (lastLfFromSSE || 0).toFixed(1);
     if (blossomEffect && lastLfFromSSE !== null) {
       const result = blossomEffect.update(lastLfFromSSE);
       updateBlossomUI(result);
@@ -1164,17 +1212,35 @@ async function startControlGroupTest() {
 
   showScreen('test');
 
-  // Show breathing circle, hide stages, show timer
+  // Show breathing circle, hide stages, show timer + debug
   document.getElementById('baseline-timer-bar').style.display = 'flex';
   document.getElementById('coherence-info').style.display = '';
   document.getElementById('blossom-info').style.display = '';
   document.getElementById('circle-wrap').style.display = '';
+  document.getElementById('debug-panel').style.display = '';
   document.querySelector('.stages-container').style.display = 'none';
   document.querySelectorAll('.info-bar')[0].style.display = 'none';
   document.querySelectorAll('.info-bar')[1].style.display = '';
 
   startBreathing();
   startBaselineTimer(durationSec);
+}
+
+// ── Debug functions ──────────────────────────────────────────────────────────
+let debugForceColorLevel = -1; // -1 = auto
+
+function debugForceColor(level) {
+  debugForceColorLevel = level;
+}
+
+function debugResetColor() {
+  debugForceColorLevel = -1;
+}
+
+function debugTriggerBlossom() {
+  if (blossomEffect) {
+    blossomEffect._spawnParticles();
+  }
 }
 
 function updateBlossomUI(result) {
@@ -1222,6 +1288,7 @@ async function startBaselineTest() {
   document.getElementById('baseline-timer-bar').style.display = 'flex';
   document.getElementById('coherence-info').style.display = 'none';
   document.getElementById('blossom-info').style.display = 'none';
+  document.getElementById('debug-panel').style.display = 'none';
   document.getElementById('circle-wrap').style.display = 'none';
   document.querySelector('.stages-container').style.display = 'none';
   document.querySelectorAll('.info-bar')[0].style.display = 'none';
@@ -1281,6 +1348,7 @@ async function stopTest() {
   coherenceTracker = null;
   blossomEffect = null;
   lastLfFromSSE = null;
+  debugForceColorLevel = -1;
   showScreen('start');
 }
 

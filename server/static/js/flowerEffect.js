@@ -120,20 +120,20 @@
     _spawnParticles() {
       const cx = this.canvas.width / 2;
       const cy = this.canvas.height / 2;
-      const count = 60;
+      const count = 100;
 
       for (let i = 0; i < count; i++) {
-        const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.3;
-        const speed = 80 + Math.random() * 200;
-        const hue = 200 + Math.random() * 60; // blue to purple range
+        const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.6;
+        const speed = 120 + Math.random() * 320;
+        const hue = 190 + Math.random() * 80; // cyan to purple range
         this.particles.push({
           x: cx,
           y: cy,
           vx: Math.cos(angle) * speed,
-          vy: Math.sin(angle) * speed,
+          vy: Math.sin(angle) * speed - 20,
           life: 1.0,
-          decay: 0.6 + Math.random() * 0.8,
-          size: 2 + Math.random() * 5,
+          decay: 0.4 + Math.random() * 0.5,
+          size: 4 + Math.random() * 8,
           hue: hue,
         });
       }
@@ -147,27 +147,28 @@
     _animate() {
       if (!this.running) return;
 
-      const dt = 0.016; // ~60fps
+      const dt = 0.016;
       this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
       let alive = false;
       for (const p of this.particles) {
         p.x += p.vx * dt;
         p.y += p.vy * dt;
-        p.vy += 40 * dt; // gentle gravity
+        p.vy += 60 * dt; // stronger gravity
         p.life -= p.decay * dt;
 
         if (p.life <= 0) continue;
         alive = true;
 
-        const alpha = p.life * 0.8;
+        const alpha = Math.min(1, p.life * 1.2);
         this.ctx.save();
         this.ctx.globalAlpha = alpha;
-        this.ctx.fillStyle = `hsl(${p.hue}, 80%, 65%)`;
-        this.ctx.shadowColor = `hsl(${p.hue}, 80%, 65%)`;
-        this.ctx.shadowBlur = 6;
+        const lightness = 55 + p.life * 20;
+        this.ctx.fillStyle = `hsl(${p.hue}, 90%, ${lightness}%)`;
+        this.ctx.shadowColor = `hsl(${p.hue}, 90%, ${lightness}%)`;
+        this.ctx.shadowBlur = 12;
         this.ctx.beginPath();
-        this.ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+        this.ctx.arc(p.x, p.y, p.size * (0.5 + p.life * 0.5), 0, Math.PI * 2);
         this.ctx.fill();
         this.ctx.restore();
       }
