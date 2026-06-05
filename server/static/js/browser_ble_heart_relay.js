@@ -373,12 +373,24 @@
       this.emitStatus('connecting', { deviceName: this.device.name || '' });
       this.server = await this.device.gatt.connect();
 
+      // Wait for GATT server to stabilise after reconnection
+      // (Web Bluetooth caches devices; on reconnect the server may not be ready yet)
+      await sleep(300);
+
       // Dynamic service discovery – same logic as Python BluetoothManager.connect()
       let services;
-      try {
-        services = await this.server.getPrimaryServices();
-      } catch (err) {
-        throw new Error('Failed to discover BLE services: ' + (err.message || err));
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          services = await this.server.getPrimaryServices();
+          break;
+        } catch (err) {
+          if (attempt < 2) {
+            console.warn(`[BLE-relay] getPrimaryServices attempt ${attempt + 1} failed, retrying...`);
+            await sleep(500);
+          } else {
+            throw new Error('Failed to discover BLE services: ' + (err.message || err));
+          }
+        }
       }
 
       console.log(`[BLE-relay] Discovered ${services.length} service(s)`);
