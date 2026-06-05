@@ -552,14 +552,15 @@
     <div class="form-group">
       <label>测试模式</label>
       <div class="ratio-select" id="mode-select">
-        <button type="button" class="ratio-btn active" data-mode="control_group">常规测试 (视觉引导)</button>
-        <button type="button" class="ratio-btn" data-mode="baseline">基线测试 (无视觉引导)</button>
+        <button type="button" class="ratio-btn active" data-mode="find_prbf">Find PRBF (扫频测试)</button>
+        <button type="button" class="ratio-btn" data-mode="control_group">Control Group (0.1Hz共振)</button>
+        <button type="button" class="ratio-btn" data-mode="baseline">Baseline (无视觉引导)</button>
       </div>
     </div>
 
-    <div class="form-group" id="baseline-duration-group" style="display:none">
-      <label>基线测试时长 (分钟)</label>
-      <input type="number" id="baseline-duration" value="6" min="1" max="30" step="1" />
+    <div class="form-group" id="duration-group" style="display:none">
+      <label>测试时长 (分钟)</label>
+      <input type="number" id="test-duration" value="6" min="1" max="30" step="1" />
     </div>
 
     <button id="start-btn">开始测试</button>
@@ -747,8 +748,8 @@ let testState = {
 
 let inhaleRatio = 5;
 let exhaleRatio = 5;
-let testMode = 'control_group';  // 'control_group' or 'baseline'
-let baselineDuration = 6;        // minutes
+let testMode = 'find_prbf';  // 'find_prbf', 'control_group', or 'baseline'
+let testDuration = 6;        // minutes (for control_group and baseline)
 
 // Animation state
 let animFrame = null;
@@ -854,8 +855,8 @@ function updateCycleIndicators() {
 const SCALE = { inhale: 1.42, exhale: 0.72 };
 
 function applyCoherenceColor() {
-  // Control group mode: always use coherence-based color
-  const freqHz = CDI_FREQUENCIES[testState.currentStage] / 60;
+  // Control group mode: coherence-based color (0.1 Hz = 6 bpm)
+  const freqHz = 6.0 / 60; // 0.1 Hz
   const result = coherenceTracker.update(
     lastBpmFromSSE || 0,
     performance.now() / 1000,
@@ -875,7 +876,17 @@ function applyPhaseColor(phase) {
   if (testMode === 'baseline') return;
 
   if (coherenceTracker) {
+    // Control group: coherence-based color
     applyCoherenceColor();
+  } else {
+    // Find PRBF: simple inhale/exhale colors
+    const c = COLORS[phase];
+    breathCircle.style.setProperty('--circle-color', c);
+    breathCircle.style.background = `radial-gradient(circle at 35% 35%, ${c}, #1a2433)`;
+    breathCircle.style.boxShadow = `0 0 40px 6px ${c}`;
+    ringEl.style.color = c;
+    arcFill.style.stroke = c;
+    phaseText.style.color = c;
   }
   phaseText.textContent = phase === 'inhale' ? '吸气' : '呼气';
 }
@@ -986,15 +997,101 @@ async function onCycleComplete() {
 }
 
 async function startTest() {
-  if (testMode === 'baseline') {
-    await startBaselineTest();
-  } else {
+  if (testMode === 'find_prbf') {
+    await startFindPrbfTest();
+  } else if (testMode === 'control_group') {
     await startControlGroupTest();
+  } else {
+    await startBaselineTest();
   }
 }
 
+// ── Find PRBF: multi-frequency sweep, simple inhale/exhale colors ──────────
+async function startFindPrbfTest() {
+  coherenceTracker = null; // No coherence colors
+
+  await fetch(api('/api/cdi-prbf/configure'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      mode: 'find_prbf',
+      cycles_per_frequency: CYCLES_PER_FREQ,
+      inhale_ratio: inhaleRatio,
+      exhale_ratio: exhaleRatio,
+      username: USERNAME,
+    })
+  });
+
+  await fetch(api('/api/cdi-prbf/start'), { method: 'POST' });
+
+  testState.currentStage = 0;
+  testState.currentCycle = 0;
+  testState.isRunning = true;
+
+  updateStageIndicators();
+  updateCycleIndicators();
+  showScreen('test');
+
+  // Show find_prbf elements
+  document.getElementById('baseline-timer-bar').style.display = 'none';
+  document.getElementById('circle-wrap').style.display = '';
+  document.querySelector('.stages-container').style.display = '';
+  document.querySelectorAll('.info-bar')[0].style.display = '';
+  document.getElementById('freq-value').parentElement.style.display = '';
+  document.getElementById('cycle-value').parentElement.style.display = '';
+  const cycleIndicatorParent = document.querySelector('.cycle-indicator').parentElement.parentElement;
+  if (cycleIndicatorParent) cycleIndicatorParent.style.display = '';
+
+  startBreathing();
+}
+
+// ── Control Group: fixed 0.1 Hz, coherence colors ─────────────────────────
+async function startControlGroupTest() {
+  const durationSec = testDuration * 60;
+  coherenceTracker = new window.RSACoherenceTracker();
+
+  await fetch(api('/api/cdi-prbf/configure'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      mode: 'control_group',
+      frequency: 6.0,
+      duration: durationSec,
+      username: USERNAME,
+    })
+  });
+
+  const resp = await fetch(api('/api/cdi-prbf/start'), { method: 'POST' });
+  const data = await resp.json();
+  if (!data.ok) { alert('启动失败'); return; }
+
+  // Set breath cycle from server response
+  testState.breathCycle = {
+    inhale: data.cycle * 0.5,
+    exhale: data.cycle * 0.5,
+    total: data.cycle,
+  };
+  testState.currentStage = 0;
+  testState.currentCycle = 0;
+  testState.isRunning = true;
+
+  showScreen('test');
+
+  // Show breathing circle, hide stages, show timer
+  document.getElementById('baseline-timer-bar').style.display = 'flex';
+  document.getElementById('circle-wrap').style.display = '';
+  document.querySelector('.stages-container').style.display = 'none';
+  document.querySelectorAll('.info-bar')[0].style.display = 'none';
+  document.querySelectorAll('.info-bar')[1].style.display = '';
+
+  startBreathing();
+  startBaselineTimer(durationSec);
+}
+
+// ── Baseline: no visual guidance ──────────────────────────────────────────
 async function startBaselineTest() {
-  const durationSec = baselineDuration * 60;
+  const durationSec = testDuration * 60;
+  coherenceTracker = null;
 
   await fetch(api('/api/cdi-prbf/configure'), {
     method: 'POST',
@@ -1013,21 +1110,17 @@ async function startBaselineTest() {
   testState.isRunning = true;
   showScreen('test');
 
-  // Show baseline timer, hide control_group elements
+  // Show timer only, hide everything else
   document.getElementById('baseline-timer-bar').style.display = 'flex';
   document.getElementById('circle-wrap').style.display = 'none';
   document.querySelector('.stages-container').style.display = 'none';
-  // Hide the first info bar (frequency/cycle info)
   document.querySelectorAll('.info-bar')[0].style.display = 'none';
-  // Hide cycle indicators in second info bar
-  document.querySelector('.cycle-indicator').parentElement.parentElement.style.display = 'none';
-  // Repurpose BPM/LF/RMSSD info for baseline
-  document.getElementById('freq-value').parentElement.style.display = 'none';
-  document.getElementById('cycle-value').parentElement.style.display = 'none';
+  document.querySelectorAll('.info-bar')[1].style.display = 'none';
 
   startBaselineTimer(durationSec);
 }
 
+// ── Timer (shared by control_group and baseline) ──────────────────────────
 function startBaselineTimer(durationSec) {
   baselineRemaining = durationSec;
   baselineStartTime = performance.now() / 1000;
@@ -1040,7 +1133,7 @@ function startBaselineTimer(durationSec) {
     if (baselineRemaining <= 0) {
       clearInterval(baselineTimerInterval);
       baselineTimerInterval = null;
-      onBaselineComplete();
+      onTimerComplete();
     }
   }, 250);
 }
@@ -1052,51 +1145,11 @@ function updateBaselineTimerDisplay() {
     `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
-async function onBaselineComplete() {
+async function onTimerComplete() {
   stopBreathing();
   await fetch(api('/api/cdi-prbf/on-baseline-complete'), { method: 'POST' });
   testState.isRunning = false;
-  showBaselineResults();
-}
-
-async function startControlGroupTest() {
-  // Reset coherence tracker on new test
-  coherenceTracker = new window.RSACoherenceTracker();
-
-  // Configure
-  await fetch(api('/api/cdi-prbf/configure'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      mode: 'control_group',
-      cycles_per_frequency: CYCLES_PER_FREQ,
-      inhale_ratio: inhaleRatio,
-      exhale_ratio: exhaleRatio,
-      username: USERNAME,
-    })
-  });
-
-  // Start
-  await fetch(api('/api/cdi-prbf/start'), { method: 'POST' });
-
-  testState.currentStage = 0;
-  testState.currentCycle = 0;
-  testState.isRunning = true;
-
-  updateStageIndicators();
-  updateCycleIndicators();
-  showScreen('test');
-
-  // Show control_group elements, hide baseline timer
-  document.getElementById('baseline-timer-bar').style.display = 'none';
-  document.getElementById('circle-wrap').style.display = '';
-  document.querySelector('.stages-container').style.display = '';
-  document.querySelectorAll('.info-bar')[0].style.display = '';
-  document.querySelector('.cycle-indicator').parentElement.parentElement.style.display = '';
-  document.getElementById('freq-value').parentElement.style.display = '';
-  document.getElementById('cycle-value').parentElement.style.display = '';
-
-  startBreathing();
+  showTimerResults();
 }
 
 async function stopTest() {
@@ -1126,7 +1179,7 @@ async function showResults() {
     const results = data.stage_results || [];
     const best = data.best_result;
 
-    // Show/hide control_group results sections
+    // Show all result cards
     document.querySelector('.result-card.best-result').style.display = '';
     document.querySelectorAll('.result-card')[1].style.display = '';
 
@@ -1161,35 +1214,29 @@ async function showResults() {
   }
 }
 
-async function showBaselineResults() {
-  // Show a simple results screen for baseline
-  document.querySelector('.result-card.best-result').style.display = 'none';
+function showTimerResults() {
+  // Simple results for control_group and baseline (timer-based)
+  document.querySelector('.result-card.best-result').style.display = '';
   document.querySelectorAll('.result-card')[1].style.display = 'none';
 
-  // Build baseline summary
-  const mins = Math.floor(baselineDuration);
-  const secs = Math.floor((baselineDuration - mins) * 60);
-  const durText = secs > 0 ? `${mins}分${secs}秒` : `${mins}分钟`;
+  const mins = Math.floor(testDuration);
+  const durText = `${mins}分钟`;
+  const modeLabel = testMode === 'control_group' ? 'Control Group (0.1Hz共振)' : 'Baseline (无视觉引导)';
 
-  // We need to read current BPM/HRV data from the SSE state
   const currentBpm = lastBpmFromSSE > 0 ? lastBpmFromSSE.toFixed(1) : '--';
   const currentRmssd = document.getElementById('rmssd-value').textContent;
   const currentLf = document.getElementById('lf-value').textContent;
 
   document.getElementById('best-freq').textContent = durText;
-  document.getElementById('best-cycle').textContent = '基线测试';
+  document.getElementById('best-cycle').textContent = modeLabel;
+  document.querySelector('.best-result h2').textContent = '测试结果';
   document.getElementById('results-body').innerHTML = `
-    <tr><td colspan="2">模式</td><td colspan="4">基线测试 (无视觉引导)</td></tr>
+    <tr><td colspan="2">模式</td><td colspan="4">${modeLabel}</td></tr>
     <tr><td colspan="2">时长</td><td colspan="4">${durText}</td></tr>
     <tr><td colspan="2">实时心率</td><td colspan="4">${currentBpm} BPM</td></tr>
     <tr><td colspan="2">HRV RMSSD</td><td colspan="4">${currentRmssd} ms</td></tr>
     <tr><td colspan="2">LF Power</td><td colspan="4">${currentLf} ms²</td></tr>
   `;
-
-  // Update the header text
-  document.querySelector('.best-result h2').textContent = '基线测试结果';
-  document.querySelector('.best-result h2').style.display = '';
-  document.querySelector('.best-result').style.display = '';
 
   showScreen('results');
 }
@@ -1210,7 +1257,7 @@ async function saveResults() {
     const resp = await fetch(api('/api/cdi-prbf/save'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: USERNAME, sub_type: testMode }),
+      body: JSON.stringify({ username: USERNAME }),
       signal: controller.signal
     });
 
@@ -1325,16 +1372,23 @@ document.querySelectorAll('#mode-select .ratio-btn').forEach(btn => {
     document.querySelectorAll('#mode-select .ratio-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     testMode = btn.dataset.mode;
-    // Show/hide baseline duration input
-    document.getElementById('baseline-duration-group').style.display =
-      testMode === 'baseline' ? '' : 'none';
+    // Show duration input for control_group and baseline, hide for find_prbf
+    const showDuration = (testMode === 'control_group' || testMode === 'baseline');
+    document.getElementById('duration-group').style.display = showDuration ? '' : 'none';
+    // Show/hide ratio selector (only for find_prbf)
+    const ratioEls = document.querySelectorAll('#start-screen .ratio-btn');
+    ratioEls.forEach(b => {
+      if (b.dataset.inhale !== undefined) {
+        b.parentElement.parentElement.style.display = testMode === 'find_prbf' ? '' : 'none';
+      }
+    });
   });
 });
 
-// Baseline duration input
-document.getElementById('baseline-duration').addEventListener('change', function() {
-  baselineDuration = Math.max(1, Math.min(30, parseInt(this.value) || 6));
-  this.value = baselineDuration;
+// Duration input
+document.getElementById('test-duration').addEventListener('change', function() {
+  testDuration = Math.max(1, Math.min(30, parseInt(this.value) || 6));
+  this.value = testDuration;
 });
 
 // BLE relay buttons

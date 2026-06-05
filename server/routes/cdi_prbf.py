@@ -69,7 +69,7 @@ def configure():
     data = request.get_json(silent=True) or {}
     
     cdi_config = {
-        "mode": data.get("mode", "control_group"),  # "baseline" or "control_group"
+        "mode": data.get("mode", "find_prbf"),  # "find_prbf", "control_group", or "baseline"
         "frequencies": CDI_FREQUENCIES,
         "cycles_per_frequency": data.get("cycles_per_frequency", CYCLES_PER_FREQUENCY),
         "inhale_ratio": data.get("inhale_ratio", 5),
@@ -81,7 +81,8 @@ def configure():
         "test_active": False,
         "test_complete": False,
         "username": data.get("username", ""),
-        "duration": data.get("duration", 360),  # baseline only, default 6 min
+        "duration": data.get("duration", 360),  # control_group/baseline, default 6 min
+        "frequency": data.get("frequency", 6.0),  # control_group only, default 6 bpm (0.1 Hz)
     }
     
     with sess.lock:
@@ -98,7 +99,7 @@ def configure():
 
 @cdi_prbf_bp.route("/api/cdi-prbf/start", methods=["POST"])
 def start_test():
-    """Start CDI PRBF test (baseline or control_group)."""
+    """Start CDI PRBF test (find_prbf, control_group, or baseline)."""
     sess = get_current_session()
 
     with sess.lock:
@@ -106,7 +107,7 @@ def start_test():
         if not cdi_config:
             return jsonify({"error": "Not configured"}), 400
 
-        mode = cdi_config.get("mode", "control_group")
+        mode = cdi_config.get("mode", "find_prbf")
         cdi_config["test_active"] = True
         cdi_config["current_stage"] = 0
         cdi_config["current_cycle"] = 0
@@ -128,22 +129,35 @@ def start_test():
         sess.cycle_rr_list.clear()
 
         if mode == "baseline":
-            # Baseline: no breath cycle needed
             duration = cdi_config.get("duration", 360)
             return jsonify({
                 "ok": True,
                 "mode": "baseline",
                 "duration": duration,
             })
+        elif mode == "control_group":
+            # Fixed 0.1 Hz (6 bpm) resonance breathing
+            freq = cdi_config.get("frequency", 6.0)
+            cycle = 60.0 / freq
+            duration = cdi_config.get("duration", 360)
+            sess.session_config["breath_cycle"] = cycle
+            sess.breath_cycle = cycle
+            return jsonify({
+                "ok": True,
+                "mode": "control_group",
+                "frequency": freq,
+                "cycle": cycle,
+                "duration": duration,
+            })
         else:
-            # Control group: set up breathing cycle
+            # find_prbf: multi-frequency sweep
             first_freq = CDI_FREQUENCIES[0]
             cycle = 60.0 / first_freq
             sess.session_config["breath_cycle"] = cycle
             sess.breath_cycle = cycle
             return jsonify({
                 "ok": True,
-                "mode": "control_group",
+                "mode": "find_prbf",
                 "current_stage": 0,
                 "frequency": CDI_FREQUENCIES[0],
                 "cycle": cycle,
@@ -377,14 +391,14 @@ def save_results():
     sess = get_current_session()
     data = request.get_json(silent=True) or {}
     username = data.get("username", "") or sess.session_config.get("username", "") or "anonymous"
-    sub_type = data.get("sub_type", "control_group")
 
     with sess.lock:
         cdi_config = sess.session_config.get("cdi_prbf", {})
         if not cdi_config:
             return jsonify({"error": "No test data"}), 400
 
-        mode = cdi_config.get("mode", "control_group")
+        mode = cdi_config.get("mode", "find_prbf")
+        sub_type = mode  # sub_type mirrors mode
         bpm_all = list(sess.bpm_all)
         rr_data = list(sess.rr_intervals)
         rr_ts_data = list(sess.rr_timestamps)
@@ -394,7 +408,7 @@ def save_results():
         final_lf = compute_lf_power(rr_data)
 
         if mode == "baseline":
-            # Baseline: flat format like main sessions (RR intervals + timestamps)
+            # Baseline: flat format, no visual guidance
             session_record = {
                 "id": str(uuid.uuid4()),
                 "session_id": sess.session_id,
@@ -417,8 +431,35 @@ def save_results():
                 "hrv_rmssd": round(final_rmssd, 2) if final_rmssd is not None else None,
                 "lf_power": round(final_lf, 4) if final_lf is not None else None,
             }
+        elif mode == "control_group":
+            # Control group: flat format, fixed 0.1 Hz resonance with visual guidance
+            freq = cdi_config.get("frequency", 6.0)
+            session_record = {
+                "id": str(uuid.uuid4()),
+                "session_id": sess.session_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "username": username,
+                "training_type": "cdi_prbf",
+                "sub_type": "control_group",
+                "tag": "同济设创数据",
+                "config": {
+                    "mode": "control_group",
+                    "frequency": freq,
+                    "breath_cycle": 60.0 / freq,
+                    "duration": cdi_config.get("duration", 360),
+                },
+                "rr_intervals_ms": rr_data,
+                "rr_timestamps": rr_ts_data,
+                "rr_count": len(rr_data),
+                "bpm_readings": bpm_all,
+                "bpm_max": round(max(bpm_all), 1) if bpm_all else None,
+                "bpm_min": round(min(bpm_all), 1) if bpm_all else None,
+                "bpm_avg": round(sum(bpm_all) / len(bpm_all), 1) if bpm_all else None,
+                "hrv_rmssd": round(final_rmssd, 2) if final_rmssd is not None else None,
+                "lf_power": round(final_lf, 4) if final_lf is not None else None,
+            }
         else:
-            # Control group: existing cycle/stage structure
+            # find_prbf: multi-frequency sweep with cycle/stage structure
             stage_data = cdi_config.get("stage_data", [])
             stage_results = cdi_config.get("stage_results", [])
             best_result = cdi_config.get("best_result")
@@ -444,7 +485,7 @@ def save_results():
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "username": username,
                 "training_type": "cdi_prbf",
-                "sub_type": "control_group",
+                "sub_type": "find_prbf",
                 "tag": "同济设创数据",
                 "config": {
                     "frequencies": CDI_FREQUENCIES,

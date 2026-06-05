@@ -40,7 +40,9 @@ def detect_training_type(data: Dict[str, Any]) -> str:
         sub = data.get("sub_type", "")
         if sub == "baseline":
             return "cdi_prbf_baseline"
-        return "cdi_prbf_control_group"
+        if sub == "control_group":
+            return "cdi_prbf_control_group"
+        return "cdi_prbf_find_prbf"
     if explicit_type == "buteyko":
         return "buteyko"
     # Check for Buteyko-specific fields (legacy)
@@ -98,8 +100,9 @@ def get_session_info(filepath: Path) -> Optional[Dict[str, Any]]:
 def get_training_type_label(training_type: str) -> str:
     """Get human-readable label for training type."""
     labels = {
-        "cdi_prbf_control_group": "CDI共振呼吸测试 - 视觉引导",
-        "cdi_prbf_baseline": "CDI共振呼吸测试 - 基线测试",
+        "cdi_prbf_find_prbf": "CDI共振呼吸测试 - Find PRBF",
+        "cdi_prbf_control_group": "CDI共振呼吸测试 - Control Group",
+        "cdi_prbf_baseline": "CDI共振呼吸测试 - Baseline",
         "buteyko": "布捷伊科屏气",
         "prbf": "个体共振频率 (PRBF)",
         "fast_resonance": "快速共振呼吸",
@@ -182,8 +185,9 @@ def list_sessions():
             "order": sort_order,
         },
         "training_types": [
-            {"value": "cdi_prbf_control_group", "label": "CDI共振呼吸测试 - 视觉引导"},
-            {"value": "cdi_prbf_baseline", "label": "CDI共振呼吸测试 - 基线测试"},
+            {"value": "cdi_prbf_find_prbf", "label": "CDI共振呼吸测试 - Find PRBF"},
+            {"value": "cdi_prbf_control_group", "label": "CDI共振呼吸测试 - Control Group"},
+            {"value": "cdi_prbf_baseline", "label": "CDI共振呼吸测试 - Baseline"},
             {"value": "buteyko", "label": "布捷伊科屏气"},
             {"value": "prbf", "label": "个体共振频率 (PRBF)"},
             {"value": "fast_resonance", "label": "快速共振呼吸"},
