@@ -13,6 +13,8 @@
 \usepackage{caption}
 \usepackage{subcaption}
 \usepackage{float}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
 
 \title{Interface A Control Group:\\
 Visual Feedback Design Rationale}
@@ -140,25 +142,37 @@ The DC component is removed:
 \tilde{x}_n = x_n - \frac{1}{N}\sum_{j=0}^{N-1} x_j.
 \]
 
-\paragraph{Step 2 — Band Power via Goertzel.}
-Rather than computing a full FFT (wasteful when only a narrow frequency band is
-of interest), the Goertzel algorithm is used to evaluate the DFT magnitude at a
-small set of fractional bin indices. The guidance band is
-$\mathcal{B} = [f_g - \Delta, f_g + \Delta]$, where $f_g$ is the breathing
-frequency in Hz and $\Delta = 0.02$~Hz. For each probe frequency
-$f \in \mathcal{B}$ with step size 0.01~Hz, the corresponding fractional DFT
-bin is $k = N \cdot f / f_s$, and the Goertzel recurrence computes
-$|X(k)|^2$ in $\mathcal{O}(N)$ time per bin:
-
-\begin{align}
-s_n &= \tilde{x}_n + 2\cos\!\left(\frac{2\pi k}{N}\right) s_{n-1} - s_{n-2}, \\
-|X(k)|^2 &= s_{N-1}^2 + s_{N-2}^2 - 2\cos\!\left(\frac{2\pi k}{N}\right) s_{N-1} s_{N-2}.
-\end{align}
-
-The band power is the sum of normalised bin powers:
+\paragraph{Step 2 — Welch PSD.}
+Rather than a single-window DFT (which yields a noisy spectrum for short
+recordings), Welch's method is used to obtain a low-variance power spectral
+density estimate. The zero-mean signal $\tilde{\mathbf{x}}$ of length $N$ is
+divided into $K$ overlapping segments of length $L = 128$, with hop size
+$H = 32$ (75\,\% overlap). Each segment $m$ is multiplied by a Hanning window
+$\mathbf{w}$ to suppress sidelobe leakage:
 \[
-P_{\text{band}} = \sum_{f \in \mathcal{B}} \frac{|X(k_f)|^2}{N^2}.
+x_n^{(m)} = \tilde{x}_{n + mH} \cdot w_n, \qquad
+w_n = 0.5\left(1 - \cos\!\left(\frac{2\pi n}{L-1}\right)\right), \quad n = 0, \dots, L-1.
 \]
+
+Each windowed segment is zero-padded to $N_{\text{FFT}} = 256$ (the next power
+of two) and transformed via radix-2 Cooley--Tukey FFT, yielding the periodogram
+$|X_m[k]|^2$ for segment $m$. The Welch PSD estimate is the segment-averaged
+periodogram:
+\[
+\hat{P}[k] = \frac{1}{K} \sum_{m=0}^{K-1} |X_m[k]|^2, \qquad
+k = 0, \dots, N_{\text{FFT}}/2.
+\]
+
+The band power is the sum of the averaged PSD over the guidance band
+$\mathcal{B} = [f_g - \Delta, f_g + \Delta]$ with $\Delta = 0.02$~Hz:
+\[
+P_{\text{band}} = \sum_{k:\; f_k \in \mathcal{B}} \hat{P}[k], \qquad
+f_k = \frac{k \cdot f_s}{N_{\text{FFT}}}.
+\]
+
+Note that because the entrainment score is a \textit{ratio} of powers, the
+absolute PSD normalisation (coherent gain of the Hanning window) cancels out
+and can be omitted from the computation.
 
 \paragraph{Step 3 — Total Power.}
 By Parseval's theorem, total signal power equals the zero-mean variance:
@@ -222,16 +236,18 @@ perceptible even in peripheral vision.
 \paragraph{Rationale.}
 The frequency-domain approach was chosen over time-domain cross-correlation for
 three reasons. First, for short windows ($\leq 60$~s, containing only 6
-breathing cycles at 0.1~Hz), frequency estimation via Goertzel is more stable
-than phase-aligned cross-correlation, which degrades when the HR--breathing
-phase relationship drifts. Second, the power-ratio formulation naturally
-handles the case where HRV is weak overall (both numerator and denominator are
-small, producing a low score) as well as the case where HRV is strong but at
-the wrong frequency (large denominator, small numerator — also a low score).
-Third, the Goertzel band-power approach is computationally lightweight (5--7
-bins $\times$ 240 samples), runs comfortably in a browser animation frame, and
-does not require the breathing phase signal — only the guidance frequency is
-needed.
+breathing cycles at 0.1~Hz), Welch PSD provides a low-variance spectral
+estimate — segment averaging with 75\,\% overlap and Hanning windowing
+suppresses both spectral leakage and estimation variance, making the band-power
+ratio more stable than a single-window DFT or cross-correlation with phase
+alignment. Second, the power-ratio formulation naturally handles the case where
+HRV is weak overall (both numerator and denominator are small, producing a low
+score) as well as the case where HRV is strong but at the wrong frequency
+(large denominator, small numerator — also a low score). Third, with $K \approx
+4$ segments of $L = 128$ points and $N_{\text{FFT}} = 256$, the Welch
+computation ($\sim$4~radix-2 FFTs) runs comfortably in a browser animation
+frame and does not require the breathing phase signal — only the guidance
+frequency is needed.
 
 The four-level discretisation with hysteresis was chosen over a continuous
 colour ramp because pilot participants reported that continuously morphing hues
@@ -266,6 +282,31 @@ following conditions are satisfied:
 \end{enumerate}
 
 When all conditions hold, a burst is emitted and the streak counter resets.
+
+\begin{algorithm}[htbp]
+\caption{Flower Blossom Decision Logic (per analysis cycle, $\sim$1~Hz)}
+\label{alg:flower-blossom}
+\begin{algorithmic}[1]
+\Require $P_{\text{LF}}$, $\theta_{\text{LF}} = 500$~ms$^2$, $N_{\text{req}} = 3$, $T_{\text{cool}} = 120$~s, $N_{\max} = 5$
+\Ensure Blossom trigger or not
+\If{session inactive or current blossoms $\geq N_{\max}$}
+  \State \Return
+\EndIf
+\If{time since last blossom $< T_{\text{cool}}$}
+  \State \Return
+\EndIf
+\If{$P_{\text{LF}} \geq \theta_{\text{LF}}$}
+  \State $\text{streak} \leftarrow \text{streak} + 1$
+  \If{$\text{streak} \geq N_{\text{req}}$}
+    \State TriggerBlossom(\textit{blossomIndex})
+    \State $\text{streak} \leftarrow 0$
+    \State $\text{blossomCount} \leftarrow \text{blossomCount} + 1$
+  \EndIf
+\Else
+  \State $\text{streak} \leftarrow 0$
+\EndIf
+\end{algorithmic}
+\end{algorithm}
 
 \subsection{Progress Accumulator}
 

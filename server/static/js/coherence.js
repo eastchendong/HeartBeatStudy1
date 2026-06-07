@@ -1,21 +1,27 @@
 /**
- * Entrainment Tracker — frequency-domain RSA entrainment score.
+ * Entrainment Tracker — frequency-domain RSA entrainment score via Welch PSD.
  *
- * Replaces the previous time-domain cross-correlation approach with a
- * frequency-domain method that measures how much HRV power is concentrated
- * at (and near) the guidance breathing frequency.
+ * Measures how much HRV power is concentrated at the guidance breathing
+ * frequency using Welch's method (segmented, windowed, averaged periodograms).
+ * This is more robust than a single-window DFT for short (30–60 s) recordings
+ * because segment averaging reduces spectral variance and the Hanning window
+ * suppresses sidelobe leakage.
  *
- * Algorithm (per update):
+ * Algorithm (per ~1 Hz update):
  *   1. Buffer HR samples in a sliding window (default 60 s).
  *   2. Resample to an even time grid (default 4 Hz) via linear interpolation.
- *   3. Compute power in a narrow band [f_g ± bandHalfWidth] using the
- *      Goertzel algorithm (evaluates DFT at arbitrary non-integer bins).
- *   4. Compute total HRV power from the zero-mean variance of the resampled
- *      signal (Parseval-equivalent).
- *   5. Raw entrainment score = band_power / total_power, clamped to [0, 1].
+ *   3. Welch PSD:
+ *      a. Split the resampled signal into overlapping segments (75 % overlap).
+ *      b. Apply a Hanning window to each segment.
+ *      c. Zero-pad each segment to the next power of two.
+ *      d. Compute the FFT periodogram |X[k]|² for each segment.
+ *      e. Average periodograms across segments → smooth PSD estimate.
+ *   4. Compute guidance-band power (f_g ± 0.02 Hz) and total power (all bins
+ *      except DC) from the averaged PSD.
+ *   5. Raw entrainment score = P_band / P_total, clamped to [0, 1].
  *   6. EMA-smooth the score, then map to 4 colour levels with hysteresis.
  *
- * Colour levels (unchanged from previous version):
+ * Colour levels:
  *   Level 0 (score < 0.4): White       rgb(255, 255, 255)
  *   Level 1 (score 0.4–0.6): Light Blue rgb(179, 217, 255)
  *   Level 2 (score 0.6–0.8): Sky Blue   rgb(102, 179, 255)
@@ -42,7 +48,9 @@
      * @param {number} [opts.windowSize=60]        Sliding window in seconds
      * @param {number} [opts.sampleRate=4]         Resample rate in Hz
      * @param {number} [opts.bandHalfWidth=0.02]   ±Hz around guidance freq
-     * @param {number} [opts.bandStep=0.01]        Hz step within the band
+     * @param {number} [opts.segmentLen=128]       Welch segment length (samples)
+     * @param {number} [opts.segmentHop=32]        Hop between segments (75 % overlap)
+     * @param {number} [opts.fftLen=256]           Zero-padded FFT length (power of 2)
      * @param {number} [opts.emaBlend=0.3]         EMA smoothing factor
      * @param {number} [opts.calibrationDelay=60]  Seconds before colour changes
      * @param {number} [opts.levelUpStreak=3]      Consecutive good cycles to level up
@@ -54,12 +62,17 @@
       this.windowSize       = opts.windowSize       || 60;
       this.sampleRate       = opts.sampleRate       || 4;
       this.bandHalfWidth    = opts.bandHalfWidth    || 0.02;
-      this.bandStep         = opts.bandStep         || 0.01;
+      this.segmentLen       = opts.segmentLen       || 128;
+      this.segmentHop       = opts.segmentHop       || 32;
+      this.fftLen           = opts.fftLen           || 256;
       this.emaBlend         = opts.emaBlend         || 0.3;
       this.calibrationDelay = opts.calibrationDelay || 60;
       this.levelUpStreak    = opts.levelUpStreak    || 3;
       this.levelDownStreak  = opts.levelDownStreak  || 3;
       this.hysteresis       = opts.hysteresis       || 0.1;
+
+      // Pre-compute Hanning window for the segment length
+      this._hanning = this._makeHanning(this.segmentLen);
 
       this.reset();
     }
@@ -77,7 +90,6 @@
 
     /**
      * Backward-compatible alias for `entrainmentScore`.
-     * Legacy code accesses `.smoothedCoherence` directly.
      */
     get smoothedCoherence() {
       return this.entrainmentScore;
@@ -88,8 +100,8 @@
     /**
      * Update the entrainment score with a new HR sample.
      *
-     * @param {number} hr            - Heart rate in BPM
-     * @param {number} timestamp     - Time in seconds (performance.now() / 1000)
+     * @param {number} hr              - Heart rate in BPM
+     * @param {number} timestamp       - Time in seconds (performance.now() / 1000)
      * @param {number} _breathingPhase - Unused (kept for API compatibility)
      * @param {number} resonantFreqHz  - Guidance breathing frequency in Hz (bpm/60)
      * @returns {{ coherence: number, level: number, color: string }}
@@ -119,9 +131,9 @@
         };
       }
 
-      // Resample → Goertzel band power → ratio → smooth → colour
+      // Resample → Welch PSD → band-power ratio → smooth → colour
       const resampled = this._resampleLinear();
-      if (resampled.length < 20) {
+      if (resampled.length < this.segmentLen) {
         return {
           coherence: this.entrainmentScore,
           level: this.currentLevel,
@@ -129,7 +141,7 @@
         };
       }
 
-      const rawScore = this._computeEntrainment(resampled, resonantFreqHz);
+      const rawScore = this._computeWelchEntrainment(resampled, resonantFreqHz);
 
       // EMA smoothing
       this.entrainmentScore =
@@ -152,9 +164,9 @@
 
     /**
      * Linearly interpolate the unevenly-sampled HR history onto an even
-     * time grid at this.sampleRate Hz.
+     * time grid at this.sampleRate Hz. Returns a zero-mean signal.
      *
-     * @returns {number[]} Evenly-spaced HR values (zero-mean removed).
+     * @returns {number[]} Evenly-spaced, zero-mean HR values.
      */
     _resampleLinear() {
       const history = this.hrHistory;
@@ -170,7 +182,6 @@
       for (let i = 0; i < n; i++) {
         const t = t0 + i * dt;
 
-        // Advance cursor so that history[cursor].timestamp <= t < history[cursor+1].timestamp
         while (
           cursor < history.length - 2 &&
           history[cursor + 1].timestamp < t
@@ -189,7 +200,7 @@
         }
       }
 
-      // Remove mean (DC) — essential for meaningful power ratio
+      // Remove mean (DC)
       let sum = 0;
       for (let i = 0; i < n; i++) sum += grid[i];
       const mean = sum / n;
@@ -198,74 +209,163 @@
       return grid;
     }
 
-    // ── Entrainment computation ─────────────────────────────────────────────
+    // ── Welch PSD ───────────────────────────────────────────────────────────
 
     /**
-     * Compute the entrainment score as the ratio of HRV power in the band
-     * [f_g ± bandHalfWidth] to total HRV power (zero-mean variance).
+     * Compute the entrainment score via Welch's method.
      *
-     * Uses the Goertzel algorithm to evaluate DFT magnitude at specific
-     * non-integer bin frequencies — far cheaper than a full FFT when only
-     * a handful of bins are needed.
+     * Steps:
+     *   1. Split the zero-mean signal into overlapping segments.
+     *   2. Apply a Hanning window to each segment.
+     *   3. Zero-pad → FFT → |X[k]|² (periodogram).
+     *   4. Average periodograms across segments → smooth PSD.
+     *   5. Guidance-band power / total power → entrainment score.
      *
      * @param {number[]} signal - Zero-mean, evenly-sampled HR values.
      * @param {number}   fGuidanceHz - Guidance breathing frequency in Hz.
      * @returns {number} Entrainment score in [0, 1].
      */
-    _computeEntrainment(signal, fGuidanceHz) {
+    _computeWelchEntrainment(signal, fGuidanceHz) {
       const N = signal.length;
+      const segLen = this.segmentLen;
+      const hop = this.segmentHop;
+      const fftLen = this.fftLen;
       const fs = this.sampleRate;
+      const halfFft = fftLen / 2;
 
-      // --- total power = variance (Parseval-equivalent for zero-mean signal) ---
-      let totalPower = 0;
-      for (let i = 0; i < N; i++) {
-        totalPower += signal[i] * signal[i];
+      // Accumulate averaged periodogram (real-valued magnitudes²)
+      const psdAccum = new Array(halfFft + 1).fill(0);
+      let numSegments = 0;
+
+      // Slide overlapping segments across the signal
+      for (let start = 0; start + segLen <= N; start += hop) {
+        // Real + imaginary arrays, zero-padded to fftLen
+        const re = new Array(fftLen).fill(0);
+        const im = new Array(fftLen).fill(0);
+
+        // Apply Hanning window and copy into FFT buffer
+        for (let i = 0; i < segLen; i++) {
+          re[i] = signal[start + i] * this._hanning[i];
+        }
+
+        // In-place radix-2 FFT
+        this._fft(re, im);
+
+        // Accumulate |X[k]|² (periodogram for this segment)
+        for (let k = 0; k <= halfFft; k++) {
+          psdAccum[k] += re[k] * re[k] + im[k] * im[k];
+        }
+
+        numSegments++;
       }
-      totalPower /= N;
-      if (totalPower < 0.001) return 0;
 
-      // --- band power via Goertzel at f_g ± k·step Hz ---
-      const fLo = Math.max(0.02, fGuidanceHz - this.bandHalfWidth);
+      if (numSegments === 0) return 0;
+
+      // Average periodograms → Welch PSD estimate
+      for (let k = 0; k <= halfFft; k++) {
+        psdAccum[k] /= numSegments;
+      }
+
+      // Frequency resolution
+      const df = fs / fftLen;
+
+      // Sum power in guidance band [f_g ± bandHalfWidth] and total power
+      const fLo = Math.max(df, fGuidanceHz - this.bandHalfWidth);
       const fHi = fGuidanceHz + this.bandHalfWidth;
       let bandPower = 0;
+      let totalPower = 0;
 
-      for (let f = fLo; f <= fHi + 0.0001; f += this.bandStep) {
-        const k = (N * f) / fs;           // non-integer bin — Goertzel handles this
-        const gPower = this._goertzel(signal, k);
-        bandPower += gPower / (N * N);     // normalise to match time-domain power scale
+      for (let k = 0; k <= halfFft; k++) {
+        const f = k * df;
+        const p = psdAccum[k];
+        totalPower += p;
+        if (f >= fLo && f <= fHi) {
+          bandPower += p;
+        }
       }
 
+      // Exclude DC (bin 0) from total power
+      totalPower -= psdAccum[0];
+      if (totalPower < 0.001) return 0;
+
+      // Entrainment score = fraction of HRV power locked to guidance frequency
       const ratio = bandPower / totalPower;
       return Math.min(1, Math.max(0, ratio));
     }
 
-    // ── Goertzel single-bin DFT ─────────────────────────────────────────────
+    // ── Hanning window ──────────────────────────────────────────────────────
 
     /**
-     * Goertzel algorithm — evaluates |X(k)|² for a DFT bin k (may be non-integer).
+     * Generate a Hanning (Hann) window of length N.
+     *   w[n] = 0.5 × (1 − cos(2πn / (N−1)))
      *
-     * Standard recurrence:
-     *   s[n] = x[n] + 2·cos(2πk/N)·s[n−1] − s[n−2]
-     *
-     * Final power:
-     *   |X(k)|² = s[N−1]² + s[N−2]² − 2·cos(2πk/N)·s[N−1]·s[N−2]
-     *
-     * @param {number[]} signal - Input samples.
-     * @param {number}   k - Fractional DFT bin index.
-     * @returns {number} Raw |X(k)|² (unnormalised).
+     * @param {number} N - Window length.
+     * @returns {number[]} Window coefficients.
      */
-    _goertzel(signal, k) {
-      const coeff = 2 * Math.cos((2 * Math.PI * k) / signal.length);
-      let s0 = 0; // s[n-1]
-      let s1 = 0; // s[n-2]
+    _makeHanning(N) {
+      const w = new Array(N);
+      for (let i = 0; i < N; i++) {
+        w[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (N - 1)));
+      }
+      return w;
+    }
 
-      for (let i = 0; i < signal.length; i++) {
-        const s = signal[i] + coeff * s0 - s1;
-        s1 = s0;
-        s0 = s;
+    // ── Radix-2 Cooley–Tukey FFT (in-place) ─────────────────────────────────
+
+    /**
+     * Compute the in-place radix-2 decimation-in-time FFT.
+     *
+     * @param {number[]} re - Real part (modified in-place).
+     * @param {number[]} im - Imaginary part (modified in-place).
+     */
+    _fft(re, im) {
+      const N = re.length;
+
+      // ── Bit-reversal permutation ──────────────────────────────────────
+      let j = 0;
+      for (let i = 0; i < N - 1; i++) {
+        if (i < j) {
+          [re[i], re[j]] = [re[j], re[i]];
+          [im[i], im[j]] = [im[j], im[i]];
+        }
+        let k = N >> 1;
+        while (k <= j) {
+          j -= k;
+          k >>= 1;
+        }
+        j += k;
       }
 
-      return s1 * s1 + s0 * s0 - coeff * s1 * s0;
+      // ── Butterfly stages ──────────────────────────────────────────────
+      for (let len = 2; len <= N; len <<= 1) {
+        const half = len >> 1;
+        const angle = (-2 * Math.PI) / len;
+        const wRe = Math.cos(angle);
+        const wIm = Math.sin(angle);
+
+        for (let i = 0; i < N; i += len) {
+          let curRe = 1;
+          let curIm = 0;
+
+          for (let k = 0; k < half; k++) {
+            const i1 = i + k;
+            const i2 = i + k + half;
+
+            const tRe = curRe * re[i2] - curIm * im[i2];
+            const tIm = curRe * im[i2] + curIm * re[i2];
+
+            re[i2] = re[i1] - tRe;
+            im[i2] = im[i1] - tIm;
+            re[i1] = re[i1] + tRe;
+            im[i1] = im[i1] + tIm;
+
+            // Advance twiddle factor
+            const nRe = curRe * wRe - curIm * wIm;
+            curIm = curRe * wIm + curIm * wRe;
+            curRe = nRe;
+          }
+        }
+      }
     }
 
     // ── Colour-level hysteresis ─────────────────────────────────────────────
@@ -334,7 +434,7 @@
           this.badStreak = 0;
         }
       } else {
-        // Level 0: only way is up
+        // Level 0
         if (s >= 0.4 + hys) {
           this.goodStreak++;
           this.badStreak = 0;
@@ -351,8 +451,6 @@
   }
 
   // ── Backward-compatible alias ─────────────────────────────────────────────
-  // Old code references `RSACoherenceTracker`; the new class is
-  // `EntrainmentTracker`.  Export both so existing pages still work.
   window.EntrainmentTracker = EntrainmentTracker;
   window.RSACoherenceTracker = EntrainmentTracker;
 })();
