@@ -1,0 +1,341 @@
+% CDI-PRBF Interface A: Visual Feedback Design Rationale
+% HCI Academic Paper Style — Algorithmic & Feedback Logic Only
+% No implementation details, no unrelated content.
+
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=1.2in]{geometry}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{float}
+
+\title{Interface A (Graphic Visualisation):\\
+Algorithmic Rationale for Breathing-Guided Biofeedback}
+
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Introduction}
+
+This document describes the three-channel visual feedback logic of Interface~A in the
+CDI-PRBF (Personalised Resonance Biofeedback) system. Interface~A adopts an
+\textit{abstract-instrumental} representational style: a pulsing circle whose size,
+colour, and ambient particle field each convey one independent dimension of the
+user's physiological state. The same sensing pipeline also drives Interface~B
+(metaphorical/ambient), making the two a fair pair for studying the effect of
+visual framing on biofeedback efficacy.
+
+The three feedback channels are:
+
+\begin{enumerate}
+  \item \textbf{Circle size} — breathing-guidance pacing (an exogenously
+    generated signal, independent of physiology).
+  \item \textbf{Circle colour} — real-time RSA (respiratory sinus arrhythmia)
+    coherence between heart rate and the prescribed breathing pattern.
+  \item \textbf{Particle burst} — a discrete reward event triggered when LF
+    (low-frequency) heart-rate-variability power exceeds a threshold,
+    signalling strong resonance.
+\end{enumerate}
+
+Each channel is described below in terms of its \textit{input signal},
+\textit{transform}, and \textit{visual mapping}.
+
+%-------------------------------------------------------------------------------
+\section{Channel 1: Circle Size — Breathing Pacing}
+
+\subsection{Input}
+The pacing engine prescribes a target breathing frequency $f_{\text{bpm}}$
+(breaths per minute) and an inhale-to-exhale ratio $R_I:R_E$. During the
+frequency-sweep phase (Find PRBF), $f_{\text{bpm}}$ steps through ten discrete
+values from 8.0 to 10.25~bpm; during the Control-Group phase it is fixed at
+6.0~bpm (0.1~Hz).
+
+\subsection{Transform}
+Let the total cycle duration be
+\[
+T_{\text{cycle}} = \frac{60}{f_{\text{bpm}}} \quad\text{(seconds)}.
+\]
+
+The inhale and exhale segment durations are
+\[
+T_I = T_{\text{cycle}} \cdot \frac{R_I}{R_I + R_E}, \qquad
+T_E = T_{\text{cycle}} \cdot \frac{R_E}{R_I + R_E}.
+\]
+
+Within each segment, phase progress $p \in [0,1]$ is defined as
+\[
+p(t) = \frac{t - t_{\text{seg-onset}}}{T_{\text{seg}}},
+\]
+clamped to $[0,1]$. The raw progress is reshaped by a quadratic ease-in-out
+function to avoid linear-motion artefacts:
+\[
+\text{ease}(p) =
+\begin{cases}
+2p^2,                & p < 0.5, \\
+-1 + (4 - 2p) \cdot p, & p \geq 0.5.
+\end{cases}
+\]
+
+\subsection{Visual Mapping}
+The circle's CSS \texttt{transform: scale} is linearly interpolated between
+two anchor scales:
+\[
+S_{\text{inhale}} = 1.42, \qquad S_{\text{exhale}} = 0.72.
+\]
+
+During inhale, the circle expands:
+\[
+s(t) = (1 - \text{ease}(p)) \cdot S_{\text{exhale}} \;+\; \text{ease}(p) \cdot S_{\text{inhale}}.
+\]
+
+During exhale, the circle contracts:
+\[
+s(t) = (1 - \text{ease}(p)) \cdot S_{\text{inhale}} \;+\; \text{ease}(p) \cdot S_{\text{exhale}}.
+\]
+
+A concentric arc simultaneously drains clockwise, completing one full
+circumference per cycle, providing a secondary spatial cue for cycle progress.
+
+\paragraph{Rationale.}
+The dynamic range $[0.72, 1.42]$ was chosen such that the circle is never
+smaller than~72\,\% nor larger than~142\,\% of its rest size, keeping the
+visual anchor recognisable across the full cycle. Quadratic easing mimics
+natural diaphragmatic breathing kinematics (slow start/end, faster mid-phase),
+which pilot testing suggested yields smoother perceived pacing than linear
+interpolation.
+
+%-------------------------------------------------------------------------------
+\section{Channel 2: Circle Colour — RSA Coherence}
+
+The colour channel operates in two regimes depending on the test mode.
+
+\subsection{Find-PRBF Mode: Phase-Colour Mapping}
+During the frequency sweep, colour serves as a simple phase indicator:
+\begin{itemize}
+  \item Inhale → Blue (\texttt{\#58a6ff}).
+  \item Exhale → Green (\texttt{\#3fb950}).
+\end{itemize}
+No physiological feedback is encoded; the colour merely reinforces the
+inhale/exhale transition, which is already signalled by size change.
+
+\subsection{Control-Group Mode: RSA Coherence}
+
+When the breathing frequency is held at 0.1~Hz, colour becomes a
+physiologically driven channel. The system continuously computes the
+cross-correlation between the user's instantaneous heart rate and the
+prescribed breathing sine wave, yielding a real-time \textit{RSA coherence}
+score.
+
+\subsubsection{Signal Processing}
+
+Let $\mathbf{h} = \{h_1, \dots, h_N\}$ be a sliding window of $N \leq 100$
+heart-rate samples (BPM), each tagged with the breathing phase
+$\phi_i \in [0,1]$ at the moment of measurement. The breathing reference
+signal is synthesised from the animation phase:
+\[
+b_i = \sin(2\pi \cdot \phi_i), \quad i = 1 \dots N.
+\]
+
+Both signals are centred (zero-mean):
+\[
+\tilde{h}_i = h_i - \bar{h}, \qquad \tilde{b}_i = b_i - \bar{b}.
+\]
+
+The cross-correlation at lag $k$ is
+\[
+r(k) = \frac{\sum_{i} \tilde{h}_i \cdot \tilde{b}_{i-k}}
+            {\sqrt{\sum_i \tilde{h}_i^2 \cdot \sum_i \tilde{b}_i^2}}.
+\]
+
+A lag search over $k \in [-15, +15]$ samples finds the peak absolute
+correlation:
+\[
+C_{\text{raw}} = \max_{|k| \leq 15} \bigl| r(k) \bigr|,
+\]
+which is clamped to $[0, 1]$. The lag search accounts for individual
+differences in the phase relationship between HR change and respiratory
+phase (some individuals show HR peak slightly before or after end-inhale).
+
+\subsubsection{Temporal Smoothing}
+
+Raw coherence is smoothed by exponential moving average (EMA) with blend
+factor $\alpha = 0.3$:
+\[
+C_{\text{smooth}}^{(t)} = \alpha \cdot C_{\text{raw}}^{(t)}
+                         + (1 - \alpha) \cdot C_{\text{smooth}}^{(t-1)}.
+\]
+
+\subsubsection{Colour-Level Mapping with Hysteresis}
+
+The smoothed coherence is discretised into four colour levels with
+hysteresis to suppress flickering:
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+\textbf{Level} & \textbf{Coherence Range} & \textbf{Colour} \\
+\midrule
+0 & $C < 0.4$                  & White \quad \texttt{rgb(255,255,255)} \\
+1 & $0.4 \leq C < 0.6$        & Light Blue \quad \texttt{rgb(179,217,255)} \\
+2 & $0.6 \leq C < 0.8$        & Sky Blue \quad \texttt{rgb(102,179,255)} \\
+3 & $C \geq 0.8$              & Deep Blue \quad \texttt{rgb(26,128,230)} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Transitions between levels require \textit{streak confirmation}: three
+consecutive coherence values must lie in the candidate level's range
+($\pm 0.1$ hysteresis band) before the colour changes. A 60-second
+calibration delay after session start suppresses discolouration during
+the initial settling period.
+
+\subsubsection{Visual Rendering}
+
+The mapped colour is applied simultaneously to: the circle's radial
+gradient (lighter at top-left, fading to dark navy at the rim), an outer
+ring stroke, the concentric arc, and the phase-text label. The circle
+also carries a CSS \texttt{box-shadow} glow in the same colour. This
+\textit{multi-element colour binding} ensures the chromatic signal is
+perceptible even in peripheral vision.
+
+\paragraph{Rationale.}
+The four-level discretisation with hysteresis was chosen over a continuous
+colour ramp because pilot participants reported that continuously morphing hues
+were difficult to interpret as \textit{states}; the stepped palette with streak
+confirmation provides clear, stable feedback about whether resonance quality is
+improving, stable, or degrading. The calibration delay prevents early erratic
+readings from anchoring an incorrect baseline impression.
+
+%-------------------------------------------------------------------------------
+\section{Channel 3: Particle Burst — LF-Power Reward}
+
+\subsection{Input}
+LF power (ms\textsuperscript{2}) is computed by the backend HRV analyser from
+a sliding window of inter-beat intervals and streamed to the frontend at
+approximately 1~Hz. LF power in the 0.04--0.15~Hz band is the primary HRV
+marker of baroreflex-mediated resonance~\cite{lehrer2014}.
+
+\subsection{Trigger Logic}
+
+A discrete particle burst (``blossom'') fires when \textit{all} of the
+following conditions are satisfied:
+
+\begin{enumerate}
+  \item \textbf{Threshold:} $\text{LF} \geq \tau$, where default
+    $\tau = 500$~ms\textsuperscript{2} (user-configurable).
+  \item \textbf{Streak:} Three consecutive readings above threshold
+    (confirms the elevation is sustained, not a single-sample artefact).
+  \item \textbf{Cooldown:} At least $T_{\text{cd}} = 120$~seconds since
+    the previous burst.
+  \item \textbf{Cap:} Fewer than $M = 5$ bursts have occurred in the
+    current session.
+\end{enumerate}
+
+When all conditions hold, a burst is emitted and the streak counter resets.
+
+\subsection{Progress Accumulator}
+
+Between bursts, a continuous progress value $P \in [0,1]$ is computed as
+\[
+P = \min\!\left(1,\; \frac{t - t_{\text{last}}}{T_{\text{cd}}}\right)
+      \cdot \left(0.5 + 0.5 \cdot \min\!\left(1,\; \frac{\text{LF}}{2\tau}\right)\right),
+\]
+where $t$ is the current session time and $t_{\text{last}}$ is the timestamp
+of the most recent burst. The first factor models cooldown recovery; the second
+factor modulates the rate by current LF power, so that higher LF power fills
+the progress indicator faster (up to $2\times$ the baseline rate).
+
+\subsection{Particle Animation}
+
+Each burst spawns $N = 100$ particles from the screen centre. Each particle
+$j$ is initialised as:
+
+\begin{itemize}
+  \item \textbf{Angle:} $\theta_j = \frac{2\pi j}{N} + \delta,\;
+    \delta \sim \mathcal{U}(-0.3, 0.3)$ rad — near-uniform radial distribution
+    with slight random jitter.
+  \item \textbf{Speed:} $v_j \sim \mathcal{U}(120, 440)$ px/s.
+  \item \textbf{Hue:} $H_j \sim \mathcal{U}(190, 270)$ — spanning cyan to
+    purple in HSL colour space.
+  \item \textbf{Life:} $L_j = 1.0$, decaying at
+    $d_j \sim \mathcal{U}(0.4, 0.9)$ per second.
+  \item \textbf{Size:} $r_j \sim \mathcal{U}(4, 12)$ px.
+\end{itemize}
+
+Particle dynamics follow a simple kinematic model with gravity:
+\begin{align*}
+  x_j(t+\Delta t) &= x_j(t) + v_{x,j} \cdot \Delta t, \\
+  y_j(t+\Delta t) &= y_j(t) + v_{y,j} \cdot \Delta t, \\
+  v_{y,j}(t+\Delta t) &= v_{y,j}(t) + 60 \cdot \Delta t \quad\text{(px/s\textsuperscript{2} downward)}.
+\end{align*}
+
+Rendering uses HSL colour with lightness proportional to remaining life
+($55 + 20 \cdot L_j$), alpha faded by a factor of $1.2 \cdot L_j$, and a
+12~px glow shadow. Particles are removed when $L_j \leq 0$; the animation
+loop terminates when all particles are dead, clearing the overlay canvas.
+
+\paragraph{Rationale.}
+The burst is designed as a \textit{discrete positive reinforcer} for
+achieving high LF power — a physiological state the user cannot directly
+control but can influence through breathing quality. The three-condition
+gate (threshold + streak + cooldown) prevents false triggering from
+motion artefacts (which typically produce single-sample outliers) and
+avoids satiation by limiting frequency (max $\approx 5$ per 10-minute
+session). The particle aesthetic (cyan-to-purple with glow) was selected
+to be visually distinct from the breathing circle's blue-green palette,
+ensuring the reward event is perceptually salient without being
+confusable with the continuous guidance channels.
+
+%-------------------------------------------------------------------------------
+\section{Summary of Signal-to-Channel Mapping}
+
+\begin{table}[H]
+\centering
+\caption{Complete signal-to-channel mapping for Interface A (Graphic).}
+\begin{tabular}{llll}
+\toprule
+\textbf{Signal} & \textbf{Source} & \textbf{Interface A} & \textbf{Interface B (for reference)} \\
+\midrule
+Breathing guidance  & Pacing engine          & Circle size (scale 0.72--1.42) & Cloud size \\
+Resonance score     & RSA--guidance coherence& Circle colour (4-level blue scale) & Cloud colour \\
+HRV reward          & LF power               & Particle burst (threshold-triggered) & Number of flowers \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+All three visual channels operate simultaneously, are rendered on distinct
+visual layers (CSS transform, CSS colour properties, HTML Canvas overlay), and
+can be independently parameterised. The design isolates representational style
+as the sole independent variable when compared with Interface~B — both
+interfaces share identical signal processing, triggering logic, and update
+rates.
+
+%-------------------------------------------------------------------------------
+\begin{thebibliography}{1}
+
+\bibitem{lehrer2014}
+P.M.\ Lehrer and R.\ Gevirtz,
+``Heart rate variability biofeedback: how and why does it work?''
+\textit{Frontiers in Psychology}, vol.~5, p.~756, 2014.
+
+\bibitem{vaschillo2006}
+E.\ Vaschillo, B.\ Vaschillo, and P.\ Lehrer,
+``Characteristics of resonance in heart rate variability stimulated by biofeedback,''
+\textit{Applied Psychophysiology and Biofeedback}, vol.~31, no.~2, pp.~129--142, 2006.
+
+\bibitem{shaffer2017}
+F.\ Shaffer and J.P.\ Ginsberg,
+``An overview of heart rate variability metrics and norms,''
+\textit{Frontiers in Public Health}, vol.~5, p.~258, 2017.
+
+\end{thebibliography}
+
+\end{document}
