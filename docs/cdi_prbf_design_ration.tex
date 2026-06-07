@@ -126,51 +126,76 @@ During the frequency sweep, colour serves as a simple phase indicator:
 No physiological feedback is encoded; the colour merely reinforces the
 inhale/exhale transition, which is already signalled by size change.
 
-\subsection{Control-Group Mode: RSA Coherence}
+\subsection{Control-Group Mode: Frequency-Domain Entrainment}
 
 When the breathing frequency is held at 0.1~Hz, colour becomes a
-physiologically driven channel. The system continuously computes the
-cross-correlation between the user's instantaneous heart rate and the
-prescribed breathing sine wave, yielding a real-time \textit{RSA coherence}
-score.
+physiologically driven channel. The system continuously estimates how much
+of the user's HRV power is concentrated at the guidance frequency, yielding a
+real-time \textit{entrainment score}. This frequency-domain approach is more
+robust than time-domain cross-correlation for short (60~s) windows because it
+does not require explicit phase alignment between HR and the breathing
+reference.
 
-\subsubsection{Signal Processing}
+\subsubsection{Signal Chain}
 
-Let $\mathbf{h} = \{h_1, \dots, h_N\}$ be a sliding window of $N \leq 100$
-heart-rate samples (BPM), each tagged with the breathing phase
-$\phi_i \in [0,1]$ at the moment of measurement. The breathing reference
-signal is synthesised from the animation phase:
+Let the unevenly sampled heart-rate time series be
+$\{(t_i, h_i)\}_{i=1}^{M}$, where $t_i$ is the timestamp (seconds) and $h_i$
+is the instantaneous heart rate (BPM). A sliding window of $W = 60$~s is
+maintained; samples with $t_i < t_{\text{now}} - W$ are discarded.
+
+\paragraph{Step 1 — Resampling.}
+The unevenly sampled HR series is linearly interpolated onto an even time grid
+with sampling rate $f_s = 4$~Hz, yielding a discrete signal
+$\mathbf{x} = \{x_0, \dots, x_{N-1}\}$ where $N = \lfloor W \cdot f_s \rfloor$.
+The DC component is removed:
 \[
-b_i = \sin(2\pi \cdot \phi_i), \quad i = 1 \dots N.
+\tilde{x}_n = x_n - \frac{1}{N}\sum_{j=0}^{N-1} x_j.
 \]
 
-Both signals are centred (zero-mean):
+\paragraph{Step 2 — Band Power via Goertzel.}
+Rather than computing a full FFT (wasteful when only a narrow frequency band is
+of interest), the Goertzel algorithm is used to evaluate the DFT magnitude at a
+small set of fractional bin indices. The guidance band is
+$\mathcal{B} = [f_g - \Delta, f_g + \Delta]$, where $f_g$ is the breathing
+frequency in Hz and $\Delta = 0.02$~Hz. For each probe frequency
+$f \in \mathcal{B}$ with step size 0.01~Hz, the corresponding fractional DFT
+bin is $k = N \cdot f / f_s$, and the Goertzel recurrence computes
+$|X(k)|^2$ in $\mathcal{O}(N)$ time per bin:
+
+\begin{align}
+s_n &= \tilde{x}_n + 2\cos\!\left(\frac{2\pi k}{N}\right) s_{n-1} - s_{n-2}, \\
+|X(k)|^2 &= s_{N-1}^2 + s_{N-2}^2 - 2\cos\!\left(\frac{2\pi k}{N}\right) s_{N-1} s_{N-2}.
+\end{align}
+
+The band power is the sum of normalised bin powers:
 \[
-\tilde{h}_i = h_i - \bar{h}, \qquad \tilde{b}_i = b_i - \bar{b}.
+P_{\text{band}} = \sum_{f \in \mathcal{B}} \frac{|X(k_f)|^2}{N^2}.
 \]
 
-The cross-correlation at lag $k$ is
+\paragraph{Step 3 — Total Power.}
+By Parseval's theorem, total signal power equals the zero-mean variance:
 \[
-r(k) = \frac{\sum_{i} \tilde{h}_i \cdot \tilde{b}_{i-k}}
-            {\sqrt{\sum_i \tilde{h}_i^2 \cdot \sum_i \tilde{b}_i^2}}.
+P_{\text{total}} = \frac{1}{N} \sum_{n=0}^{N-1} \tilde{x}_n^{\,2}.
 \]
 
-A lag search over $k \in [-15, +15]$ samples finds the peak absolute
-correlation:
+\paragraph{Step 4 — Entrainment Score.}
+The raw entrainment score is the power ratio, clamped to $[0, 1]$:
 \[
-C_{\text{raw}} = \max_{|k| \leq 15} \bigl| r(k) \bigr|,
+S_{\text{raw}} = \min\!\left(1,\; \max\!\left(0,\; \frac{P_{\text{band}}}{P_{\text{total}}}\right)\right).
 \]
-which is clamped to $[0, 1]$. The lag search accounts for individual
-differences in the phase relationship between HR change and respiratory
-phase (some individuals show HR peak slightly before or after end-inhale).
+
+An entrainment score of~1.0 indicates that virtually all HRV power is
+concentrated at (and immediately around) the guidance breathing frequency;
+a score near~0 indicates that HR variability is dominated by other
+frequencies (or absent altogether).
 
 \subsubsection{Temporal Smoothing}
 
-Raw coherence is smoothed by exponential moving average (EMA) with blend
-factor $\alpha = 0.3$:
+Raw entrainment score is smoothed by exponential moving average (EMA) with
+blend factor $\alpha = 0.3$:
 \[
-C_{\text{smooth}}^{(t)} = \alpha \cdot C_{\text{raw}}^{(t)}
-                         + (1 - \alpha) \cdot C_{\text{smooth}}^{(t-1)}.
+S_{\text{smooth}}^{(t)} = \alpha \cdot S_{\text{raw}}^{(t)}
+                         + (1 - \alpha) \cdot S_{\text{smooth}}^{(t-1)}.
 \]
 
 \subsubsection{Colour-Level Mapping with Hysteresis}
@@ -207,6 +232,19 @@ also carries a CSS \texttt{box-shadow} glow in the same colour. This
 perceptible even in peripheral vision.
 
 \paragraph{Rationale.}
+The frequency-domain approach was chosen over time-domain cross-correlation for
+three reasons. First, for short windows ($\leq 60$~s, containing only 6
+breathing cycles at 0.1~Hz), frequency estimation via Goertzel is more stable
+than phase-aligned cross-correlation, which degrades when the HR--breathing
+phase relationship drifts. Second, the power-ratio formulation naturally
+handles the case where HRV is weak overall (both numerator and denominator are
+small, producing a low score) as well as the case where HRV is strong but at
+the wrong frequency (large denominator, small numerator — also a low score).
+Third, the Goertzel band-power approach is computationally lightweight (5--7
+bins $\times$ 240 samples), runs comfortably in a browser animation frame, and
+does not require the breathing phase signal — only the guidance frequency is
+needed.
+
 The four-level discretisation with hysteresis was chosen over a continuous
 colour ramp because pilot participants reported that continuously morphing hues
 were difficult to interpret as \textit{states}; the stepped palette with streak
