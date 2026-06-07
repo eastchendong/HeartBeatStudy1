@@ -52,6 +52,7 @@ class SessionState:
         self.latest_bpm:  float         = 0.0
         self.latest_rmssd: Optional[float] = None
         self.latest_lf_power: Optional[float] = None
+        self.latest_rr_interval: Optional[float] = None  # most recent valid RR interval (ms)
         self.breath_cycle: float        = 10.0
         self.subscribers: List[queue.Queue] = []
 

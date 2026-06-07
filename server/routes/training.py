@@ -67,6 +67,7 @@ def _make_payload(sess: SessionState, bpm: float, rmssd: Optional[float], cycle:
         "bpm":               round(bpm, 1),
         "hrv_rmssd":         round(rmssd, 1) if rmssd is not None else None,
         "lf_power":          round(sess.latest_lf_power, 4) if sess.latest_lf_power is not None else None,
+        "rr_interval":       round(sess.latest_rr_interval, 1) if sess.latest_rr_interval is not None else None,
         "total":             cycle,
         "inhale":            inhale,
         "exhale":            exhale,
@@ -120,6 +121,7 @@ def receive_pulse():
             if 200 < rr_val < 2000:
                 sess.rr_intervals.append(rr_val)
                 sess.rr_timestamps.append(now)
+                sess.latest_rr_interval = rr_val
                 # Also track for per-cycle RR (CDI PRBF)
                 if hasattr(sess, 'current_cycle_rr'):
                     sess.current_cycle_rr.append(rr_val)

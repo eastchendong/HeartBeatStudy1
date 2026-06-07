@@ -725,6 +725,9 @@
       </span>
     </div>
   </div>
+
+  <!-- Live stats tracker (control_group only) -->
+  <div id="stats-tracker-container" style="display:none;width:min(700px,95vw);margin-top:0.5rem;position:relative;z-index:20;pointer-events:auto"></div>
 </div>
 
 <!-- ═══════════════════ RESULTS SCREEN ═══════════════════ -->
@@ -781,6 +784,7 @@
 <script src="{{ url_for('static', filename='js/browser_ble_heart_relay.js') }}"></script>
 <script src="{{ url_for('static', filename='js/coherence.js') }}"></script>
 <script src="{{ url_for('static', filename='js/flowerEffect.js') }}"></script>
+<script src="{{ url_for('static', filename='js/statsTracker.js') }}"></script>
 <script>
 // ══════════════════════════════════════════════════════════════════════════
 // Constants & Config
@@ -848,6 +852,10 @@ let baselineStartTime = null;
 let blossomEffect = null;
 let blossomInterval = null;
 let lastLfFromSSE = null;
+let lastRrFromSSE = null;
+
+// Live stats tracker (control_group only)
+let statsTracker = null;
 
 // Control group time-series data collection
 let controlGroupData = null;  // { bpm: [], lf: [], coherence: [], timestamps: [] }
@@ -1137,6 +1145,7 @@ async function startFindPrbfTest() {
   document.getElementById('coherence-info').style.display = 'none';
   document.getElementById('blossom-info').style.display = 'none';
   document.getElementById('debug-panel').style.display = 'none';
+  document.getElementById('stats-tracker-container').style.display = 'none';
   document.getElementById('circle-wrap').style.display = '';
   document.querySelector('.stages-container').style.display = '';
   document.querySelectorAll('.info-bar')[0].style.display = '';
@@ -1183,6 +1192,15 @@ async function startControlGroupTest() {
       const result = blossomEffect.update(lastLfFromSSE);
       updateBlossomUI(result);
     }
+    // Feed live stats tracker
+    if (statsTracker) {
+      statsTracker.addDataPoint({
+        bpm: lastBpmFromSSE || 0,
+        rrInterval: lastRrFromSSE || 0,
+        coherence: coherenceTracker ? coherenceTracker.smoothedCoherence : 0,
+        lfPower: lastLfFromSSE || 0,
+      });
+    }
   }, 1000);
 
   await fetch(api('/api/cdi-prbf/configure'), {
@@ -1211,6 +1229,12 @@ async function startControlGroupTest() {
   testState.isRunning = true;
 
   showScreen('test');
+
+  // Init stats tracker
+  const statsContainer = document.getElementById('stats-tracker-container');
+  statsContainer.style.display = '';
+  statsTracker = new window.LiveStatsTracker(statsContainer);
+  statsTracker.start();
 
   // Show breathing circle, hide stages, show timer + debug
   document.getElementById('baseline-timer-bar').style.display = 'flex';
@@ -1292,6 +1316,7 @@ async function startBaselineTest() {
   document.getElementById('coherence-info').style.display = 'none';
   document.getElementById('blossom-info').style.display = 'none';
   document.getElementById('debug-panel').style.display = 'none';
+  document.getElementById('stats-tracker-container').style.display = 'none';
   document.getElementById('circle-wrap').style.display = 'none';
   document.querySelector('.stages-container').style.display = 'none';
   document.querySelectorAll('.info-bar')[0].style.display = 'none';
@@ -1344,6 +1369,10 @@ async function stopTest() {
     clearInterval(blossomInterval);
     blossomInterval = null;
   }
+  if (statsTracker) {
+    statsTracker.stop();
+    statsTracker = null;
+  }
   await fetch(api('/api/cdi-prbf/stop'), { method: 'POST' });
   await fetch(api('/api/cdi-prbf/reset'), { method: 'POST' });
 
@@ -1351,6 +1380,8 @@ async function stopTest() {
   coherenceTracker = null;
   blossomEffect = null;
   lastLfFromSSE = null;
+  lastRrFromSSE = null;
+  statsTracker = null;
   debugForceColorLevel = -1;
   showScreen('start');
 }
@@ -1681,7 +1712,7 @@ function connectSSE() {
   
   es.onmessage = (ev) => {
     const data = JSON.parse(ev.data);
-    const { bpm, hrv_rmssd, lf_power } = data;
+    const { bpm, hrv_rmssd, lf_power, rr_interval } = data;
 
     if (bpm > 0) {
       bpmValue.textContent = bpm.toFixed(1);
@@ -1698,6 +1729,9 @@ function connectSSE() {
     if (lf_power != null) {
       lfValue.textContent = lf_power.toFixed(3);
       lastLfFromSSE = lf_power;
+    }
+    if (rr_interval != null) {
+      lastRrFromSSE = rr_interval;
     }
   };
   
