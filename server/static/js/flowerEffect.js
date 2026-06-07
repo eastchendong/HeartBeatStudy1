@@ -52,9 +52,8 @@
     }
 
     resize() {
-      const rect = this.canvas.parentElement.getBoundingClientRect();
-      this.canvas.width = rect.width;
-      this.canvas.height = rect.height;
+      this.canvas.width = window.innerWidth;
+      this.canvas.height = window.innerHeight;
     }
 
     /**
