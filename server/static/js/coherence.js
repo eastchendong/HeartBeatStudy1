@@ -21,11 +21,11 @@
  *   5. Raw entrainment score = P_band / P_total, clamped to [0, 1].
  *   6. EMA-smooth the score, then map to 4 colour levels with hysteresis.
  *
- * Colour levels:
+ * Colour levels (white → black for AR glasses, where black = transparent):
  *   Level 0 (score < 0.4): White       rgb(255, 255, 255)
- *   Level 1 (score 0.4–0.6): Light Blue rgb(179, 217, 255)
- *   Level 2 (score 0.6–0.8): Sky Blue   rgb(102, 179, 255)
- *   Level 3 (score ≥ 0.8):  Deep Blue   rgb(26, 128, 230)
+ *   Level 1 (score 0.4–0.6): Light Gray rgb(170, 170, 170)
+ *   Level 2 (score 0.6–0.8): Dark Gray  rgb( 80,  80,  80)
+ *   Level 3 (score ≥ 0.8):  Near Black  rgb( 20,  20,  20)
  *
  * Usage:
  *   const tracker = new EntrainmentTracker();
@@ -35,11 +35,12 @@
 (function () {
   'use strict';
 
+  // White → Black gradient for AR glasses (black = transparent in AR)
   const COLOR_LEVELS = [
     { name: 'White',      color: 'rgb(255, 255, 255)', scoreMin: 0.0 },
-    { name: 'Light Blue', color: 'rgb(179, 217, 255)', scoreMin: 0.4 },
-    { name: 'Sky Blue',   color: 'rgb(102, 179, 255)', scoreMin: 0.6 },
-    { name: 'Deep Blue',  color: 'rgb(26, 128, 230)',  scoreMin: 0.8 },
+    { name: 'Light Gray', color: 'rgb(170, 170, 170)', scoreMin: 0.4 },
+    { name: 'Dark Gray',  color: 'rgb( 80,  80,  80)', scoreMin: 0.6 },
+    { name: 'Near Black', color: 'rgb( 20,  20,  20)', scoreMin: 0.8 },
   ];
 
   class EntrainmentTracker {

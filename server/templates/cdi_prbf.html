@@ -9,8 +9,8 @@
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
-    --bg:        #0d1117;
-    --surface:   #161b22;
+    --bg:        #000000;
+    --surface:   #0a0a0a;
     --border:    #30363d;
     --text:      #e6edf3;
     --muted:     #8b949e;
@@ -336,7 +336,7 @@
   #breath-circle {
     width: 55%; height: 55%;
     border-radius: 50%;
-    background: radial-gradient(circle at 35% 35%, var(--circle-color, #ffffff), #1a2433);
+    background: radial-gradient(circle at 35% 35%, var(--circle-color, #ffffff), #000000);
     box-shadow: 0 0 40px 6px var(--circle-color, #ffffff);
     transition: background 0.6s ease, box-shadow 0.6s ease;
     will-change: transform;
@@ -713,9 +713,9 @@
     <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center">
       <span style="font-size:0.75rem;color:var(--muted)">颜色等级:</span>
       <button class="debug-btn" onclick="debugForceColor(0)" style="background:#fff;color:#333">0 白</button>
-      <button class="debug-btn" onclick="debugForceColor(1)" style="background:rgb(179,217,255);color:#333">1 浅蓝</button>
-      <button class="debug-btn" onclick="debugForceColor(2)" style="background:rgb(102,179,255);color:#fff">2 天蓝</button>
-      <button class="debug-btn" onclick="debugForceColor(3)" style="background:rgb(26,128,230);color:#fff">3 深蓝</button>
+      <button class="debug-btn" onclick="debugForceColor(1)" style="background:rgb(170,170,170);color:#000">1 浅灰</button>
+      <button class="debug-btn" onclick="debugForceColor(2)" style="background:rgb(80,80,80);color:#fff">2 深灰</button>
+      <button class="debug-btn" onclick="debugForceColor(3)" style="background:rgb(20,20,20);color:#fff">3 近黑</button>
       <button class="debug-btn" onclick="debugResetColor()" style="background:var(--bg);color:var(--text);border:1px solid var(--border)">恢复自动</button>
     </div>
     <div style="display:flex;gap:0.5rem;margin-top:0.6rem;align-items:center">
@@ -953,9 +953,9 @@ const SCALE = { inhale: 1.42, exhale: 0.72 };
 
 const DEBUG_COLORS = [
   'rgb(255, 255, 255)',
-  'rgb(179, 217, 255)',
-  'rgb(102, 179, 255)',
-  'rgb(26, 128, 230)',
+  'rgb(170, 170, 170)',
+  'rgb( 80,  80,  80)',
+  'rgb( 20,  20,  20)',
 ];
 
 function applyCoherenceColor() {
@@ -975,7 +975,7 @@ function applyCoherenceColor() {
     c = result.color;
   }
   breathCircle.style.setProperty('--circle-color', c);
-  breathCircle.style.background = `radial-gradient(circle at 35% 35%, ${c}, #1a2433)`;
+  breathCircle.style.background = `radial-gradient(circle at 35% 35%, ${c}, #000000)`;
   breathCircle.style.boxShadow = `0 0 40px 6px ${c}`;
   ringEl.style.color = c;
   arcFill.style.stroke = c;
@@ -992,7 +992,7 @@ function applyPhaseColor(phase) {
     // Find PRBF: simple inhale/exhale colors
     const c = COLORS[phase];
     breathCircle.style.setProperty('--circle-color', c);
-    breathCircle.style.background = `radial-gradient(circle at 35% 35%, ${c}, #1a2433)`;
+    breathCircle.style.background = `radial-gradient(circle at 35% 35%, ${c}, #000000)`;
     breathCircle.style.boxShadow = `0 0 40px 6px ${c}`;
     ringEl.style.color = c;
     arcFill.style.stroke = c;
@@ -1171,7 +1171,10 @@ async function startControlGroupTest() {
 
   // Init blossom effect with custom threshold
   const particleCanvas = document.getElementById('particle-canvas');
-  blossomEffect = new window.LFBlossomEffect(particleCanvas, { threshold: lfThreshold });
+  blossomEffect = new window.LFBlossomEffect(particleCanvas, {
+    threshold: lfThreshold,
+    sessionDuration: durationSec,
+  });
   blossomEffect.startSession();
 
   // Init persistent particle ring around the breathing circle

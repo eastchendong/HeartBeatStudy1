@@ -414,11 +414,14 @@ def blossom_status():
     sess = get_current_session()
 
     with sess.lock:
+        cdi_config = sess.session_config.get("cdi_prbf", {})
+        cooldown = cdi_config.get("duration", 360) / 5.0
+
         elapsed = 0.0
         if sess.session_start and sess.last_blossom_time > 0:
             elapsed = (time.time() - sess.session_start) - sess.last_blossom_time
 
-        cooldown_remaining = max(0, 120 - elapsed) if sess.blossom_count < 5 else 0
+        cooldown_remaining = max(0, cooldown - elapsed) if sess.blossom_count < 5 else 0
 
         return jsonify({
             "blossom_count": sess.blossom_count,
@@ -443,6 +446,9 @@ def update_blossom_streak():
     threshold = sess.blossom_threshold
 
     with sess.lock:
+        cdi_config = sess.session_config.get("cdi_prbf", {})
+        cooldown = cdi_config.get("duration", 360) / 5.0
+
         elapsed_since_last = 999.0
         if sess.session_start:
             now = time.time() - sess.session_start
@@ -451,7 +457,7 @@ def update_blossom_streak():
 
         can_blossom = (
             sess.blossom_count < 5
-            and elapsed_since_last >= 120.0
+            and elapsed_since_last >= cooldown
         )
 
         should_trigger = False
@@ -463,7 +469,7 @@ def update_blossom_streak():
             sess.blossom_streak = 0
 
         # Progress toward next blossom
-        cooldown_ratio = min(1.0, max(0.0, elapsed_since_last / 120.0)) if can_blossom else 1.0
+        cooldown_ratio = min(1.0, max(0.0, elapsed_since_last / cooldown)) if can_blossom else 1.0
         power_ratio = min(1.0, max(0.0, (lf_power or 0) / (threshold * 2)))
         progress = cooldown_ratio * (0.5 + 0.5 * power_ratio) if sess.blossom_count < 5 else 1.0
 
@@ -472,7 +478,7 @@ def update_blossom_streak():
             "blossom_count": sess.blossom_count,
             "blossom_streak": sess.blossom_streak,
             "progress": round(progress, 4),
-            "cooldown_remaining": round(max(0, 120.0 - elapsed_since_last), 1),
+            "cooldown_remaining": round(max(0, cooldown - elapsed_since_last), 1),
         })
 
 

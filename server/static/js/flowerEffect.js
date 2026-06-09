@@ -3,7 +3,7 @@
  *
  * Matches Unity FlowerBlossomController logic:
  *   - LF Power >= 500 ms^2 for 3 consecutive readings → trigger
- *   - 120s cooldown between triggers
+ *   - Cooldown = sessionDuration / 5 between triggers
  *   - Max 5 blossoms per session
  *
  * Usage:
@@ -19,9 +19,8 @@
   const DEFAULT_CONFIG = {
     threshold: 500,            // LF Power threshold (ms^2)
     requiredStreak: 3,         // consecutive good readings
-    cooldown: 120,             // seconds between blossoms
     maxBlossoms: 5,            // max per session
-    sessionDuration: 600,      // seconds
+    sessionDuration: 600,      // seconds — cooldown = sessionDuration / 5
   };
 
   class LFBlossomEffect {
@@ -32,6 +31,10 @@
       this.particles = [];
       this.running = false;
       this.config = Object.assign({}, DEFAULT_CONFIG, opts);
+      // Auto-compute cooldown from session duration if not explicitly set
+      if (!opts.cooldown) {
+        this.config.cooldown = this.config.sessionDuration / 5;
+      }
       this.reset();
     }
 
