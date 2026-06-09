@@ -42,6 +42,8 @@ def detect_training_type(data: Dict[str, Any]) -> str:
             return "cdi_prbf_baseline"
         if sub == "control_group":
             return "cdi_prbf_control_group"
+        if sub == "deep_breathing":
+            return "cdi_prbf_deep_breathing"
         return "cdi_prbf_find_prbf"
     if explicit_type == "buteyko":
         return "buteyko"
@@ -103,6 +105,7 @@ def get_training_type_label(training_type: str) -> str:
         "cdi_prbf_find_prbf": "CDI共振呼吸测试 - Find PRBF",
         "cdi_prbf_control_group": "CDI共振呼吸测试 - Control Group",
         "cdi_prbf_baseline": "CDI共振呼吸测试 - Baseline",
+        "cdi_prbf_deep_breathing": "CDI共振呼吸测试 - 深呼吸",
         "buteyko": "布捷伊科屏气",
         "prbf": "个体共振频率 (PRBF)",
         "fast_resonance": "快速共振呼吸",
@@ -188,6 +191,7 @@ def list_sessions():
             {"value": "cdi_prbf_find_prbf", "label": "CDI共振呼吸测试 - Find PRBF"},
             {"value": "cdi_prbf_control_group", "label": "CDI共振呼吸测试 - Control Group"},
             {"value": "cdi_prbf_baseline", "label": "CDI共振呼吸测试 - Baseline"},
+            {"value": "cdi_prbf_deep_breathing", "label": "CDI共振呼吸测试 - 深呼吸"},
             {"value": "buteyko", "label": "布捷伊科屏气"},
             {"value": "prbf", "label": "个体共振频率 (PRBF)"},
             {"value": "fast_resonance", "label": "快速共振呼吸"},
