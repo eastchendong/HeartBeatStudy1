@@ -1043,18 +1043,18 @@ function animate(ts) {
   }
 }
 
-function startBreathing() {
+function startBreathing(freqOverride) {
   if (animFrame) cancelAnimationFrame(animFrame);
-  const freq = CDI_FREQUENCIES[testState.currentStage];
+  const freq = freqOverride !== undefined ? freqOverride : CDI_FREQUENCIES[testState.currentStage];
   const cycle = freqToCycle(freq);
   const totalRatio = inhaleRatio + exhaleRatio;
   const inhale = cycle * inhaleRatio / totalRatio;
   const exhale = cycle * exhaleRatio / totalRatio;
-  
+
   testState.breathCycle = { inhale, exhale, total: cycle };
   freqValue.textContent = freq.toFixed(2);
   cycleValue.textContent = cycle.toFixed(2);
-  
+
   requestAnimationFrame(ts => {
     startPhase('inhale', ts);
     animFrame = requestAnimationFrame(animate);
@@ -1072,35 +1072,38 @@ function stopBreathing() {
 // Test Logic
 // ═══════════════════════════════════════════════════════════════════════════
 async function onCycleComplete() {
-  // Notify server
+  // Notify server (cycle data recording)
   try {
     const resp = await fetch(api('/api/cdi-prbf/on-cycle-complete'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     });
     const data = await resp.json();
-    
+
     if (data.test_complete) {
       stopBreathing();
       showResults();
       return;
     }
-    
+
+    // Only find_prbf mode has frequency staging; control_group/baseline just record cycles
+    if (testMode !== 'find_prbf') {
+      return;  // Keep breathing at fixed frequency, no stage indicators
+    }
+
     if (data.stage_complete) {
       // New stage - reset coherence tracker for new frequency
       if (coherenceTracker) coherenceTracker.reset();
-      testState.currentStage = data.new_stage - 1; // Convert to 0-indexed
+      testState.currentStage = data.new_stage - 1;
       testState.currentCycle = 0;
       updateStageIndicators();
       updateCycleIndicators();
-      // Restart breathing animation with new cycle
       startBreathing();
     } else {
-      // Same stage, next cycle
-      testState.currentCycle = data.current_cycle - 1; // Convert to 0-indexed
+      testState.currentCycle = data.current_cycle - 1;
       updateCycleIndicators();
     }
-    
+
   } catch (e) {
     console.error('Cycle complete error:', e);
   }
@@ -1273,7 +1276,7 @@ async function startControlGroupTest() {
   // Re-size blossom canvas now that the screen is visible
   if (blossomEffect) blossomEffect.resize();
 
-  startBreathing();
+  startBreathing(6.0);  // 0.1 Hz fixed frequency for control group
   startBaselineTimer(durationSec);
 }
 

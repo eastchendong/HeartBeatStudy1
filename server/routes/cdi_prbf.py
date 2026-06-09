@@ -184,16 +184,17 @@ def on_cycle_complete():
         cdi_config = sess.session_config.get("cdi_prbf", {})
         if not cdi_config.get("test_active"):
             return jsonify({"error": "Test not active"}), 400
-        
+
+        mode = cdi_config.get("mode", "find_prbf")
         current_stage = cdi_config["current_stage"]
         current_cycle = cdi_config["current_cycle"]
-        
+
         # Save RR intervals for this cycle
         cycle_rr = list(sess.current_cycle_rr)
         if cycle_rr:
             sess.cycle_rr_list.append(cycle_rr)
         sess.current_cycle_rr.clear()
-        
+
         # Record current cycle data
         cycle_data = {
             "cycle": current_cycle + 1,
@@ -203,7 +204,18 @@ def on_cycle_complete():
             "rr_intervals": cycle_rr,
         }
         cdi_config["stage_data"].append(cycle_data)
-        
+
+        # Only find_prbf mode has frequency staging; control_group/baseline just record cycles
+        if mode != "find_prbf":
+            cdi_config["current_cycle"] = current_cycle + 1
+            return jsonify({
+                "ok": True,
+                "stage_complete": False,
+                "test_complete": False,
+                "mode": mode,
+                "cycle": current_cycle + 2,
+            })
+
         cycles_per_freq = cdi_config.get("cycles_per_frequency", CYCLES_PER_FREQUENCY)
         total_stages = len(CDI_FREQUENCIES)
         
