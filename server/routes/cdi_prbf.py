@@ -68,6 +68,8 @@ def configure():
     sess = get_current_session()
     data = request.get_json(silent=True) or {}
     
+    blossom_threshold = data.get("blossom_threshold", 500)
+
     cdi_config = {
         "mode": data.get("mode", "find_prbf"),  # "find_prbf", "control_group", or "baseline"
         "frequencies": CDI_FREQUENCIES,
@@ -84,11 +86,12 @@ def configure():
         "duration": data.get("duration", 360),  # control_group/baseline, default 6 min
         "frequency": data.get("frequency", 6.0),  # control_group only, default 6 bpm (0.1 Hz)
     }
-    
+
     with sess.lock:
         sess.session_config["cdi_prbf"] = cdi_config
         sess.session_config["inhale_ratio"] = cdi_config["inhale_ratio"]
         sess.session_config["exhale_ratio"] = cdi_config["exhale_ratio"]
+        sess.blossom_threshold = float(blossom_threshold)
     
     return jsonify({
         "ok": True,
@@ -127,6 +130,9 @@ def start_test():
         sess.latest_bpm = 0.0
         sess.current_cycle_rr.clear()
         sess.cycle_rr_list.clear()
+        sess.blossom_count = 0
+        sess.blossom_streak = 0
+        sess.last_blossom_time = -999
 
         if mode == "baseline":
             duration = cdi_config.get("duration", 360)
@@ -303,6 +309,8 @@ def get_status():
             "current_metrics": metrics,
             "stage_results": cdi_config.get("stage_results", []),
             "best_result": cdi_config.get("best_result"),
+            "blossom_count": sess.blossom_count,
+            "blossom_threshold": sess.blossom_threshold,
         })
 
 
@@ -362,6 +370,97 @@ def get_results():
             "best_result": cdi_config.get("best_result"),
             "all_rr_intervals": list(sess.rr_intervals),
             "all_bpm": list(sess.bpm_all),
+        })
+
+
+@cdi_prbf_bp.route("/api/cdi-prbf/blossom-event", methods=["POST"])
+def blossom_event():
+    """
+    Called by frontend when a blossom burst triggers.
+    Tracks blossom count and timing server-side so it can be saved.
+    """
+    sess = get_current_session()
+
+    with sess.lock:
+        sess.blossom_count = min(sess.blossom_count + 1, 5)
+        sess.blossom_streak = 0
+        if sess.session_start:
+            sess.last_blossom_time = time.time() - sess.session_start
+        else:
+            sess.last_blossom_time = 0
+
+    return jsonify({
+        "ok": True,
+        "blossom_count": sess.blossom_count,
+        "last_blossom_time": sess.last_blossom_time,
+    })
+
+
+@cdi_prbf_bp.route("/api/cdi-prbf/blossom-status")
+def blossom_status():
+    """Get current blossom state (count, streak, cooldown progress)."""
+    sess = get_current_session()
+
+    with sess.lock:
+        elapsed = 0.0
+        if sess.session_start and sess.last_blossom_time > 0:
+            elapsed = (time.time() - sess.session_start) - sess.last_blossom_time
+
+        cooldown_remaining = max(0, 120 - elapsed) if sess.blossom_count < 5 else 0
+
+        return jsonify({
+            "blossom_count": sess.blossom_count,
+            "blossom_streak": sess.blossom_streak,
+            "blossom_threshold": sess.blossom_threshold,
+            "last_blossom_time": sess.last_blossom_time,
+            "cooldown_remaining": round(cooldown_remaining, 1),
+            "max_blossoms": 5,
+        })
+
+
+@cdi_prbf_bp.route("/api/cdi-prbf/blossom-streak", methods=["POST"])
+def update_blossom_streak():
+    """
+    Called by frontend every ~1s with current LF power.
+    Server tracks the streak counter for blossom trigger gating.
+    Returns whether a blossom should trigger.
+    """
+    sess = get_current_session()
+    data = request.get_json(silent=True) or {}
+    lf_power = data.get("lf_power", 0)
+    threshold = sess.blossom_threshold
+
+    with sess.lock:
+        elapsed_since_last = 999.0
+        if sess.session_start:
+            now = time.time() - sess.session_start
+            if sess.last_blossom_time > 0:
+                elapsed_since_last = now - sess.last_blossom_time
+
+        can_blossom = (
+            sess.blossom_count < 5
+            and elapsed_since_last >= 120.0
+        )
+
+        should_trigger = False
+        if can_blossom and lf_power is not None and lf_power >= threshold:
+            sess.blossom_streak += 1
+            if sess.blossom_streak >= 3:
+                should_trigger = True
+        elif lf_power is not None and lf_power < threshold:
+            sess.blossom_streak = 0
+
+        # Progress toward next blossom
+        cooldown_ratio = min(1.0, max(0.0, elapsed_since_last / 120.0)) if can_blossom else 1.0
+        power_ratio = min(1.0, max(0.0, (lf_power or 0) / (threshold * 2)))
+        progress = cooldown_ratio * (0.5 + 0.5 * power_ratio) if sess.blossom_count < 5 else 1.0
+
+        return jsonify({
+            "should_trigger": should_trigger,
+            "blossom_count": sess.blossom_count,
+            "blossom_streak": sess.blossom_streak,
+            "progress": round(progress, 4),
+            "cooldown_remaining": round(max(0, 120.0 - elapsed_since_last), 1),
         })
 
 
@@ -430,6 +529,8 @@ def save_results():
                 "bpm_avg": round(sum(bpm_all) / len(bpm_all), 1) if bpm_all else None,
                 "hrv_rmssd": round(final_rmssd, 2) if final_rmssd is not None else None,
                 "lf_power": round(final_lf, 4) if final_lf is not None else None,
+                "blossom_count": sess.blossom_count,
+                "blossom_threshold": sess.blossom_threshold,
             }
         elif mode == "control_group":
             # Control group: flat format, fixed 0.1 Hz resonance with visual guidance
@@ -457,6 +558,8 @@ def save_results():
                 "bpm_avg": round(sum(bpm_all) / len(bpm_all), 1) if bpm_all else None,
                 "hrv_rmssd": round(final_rmssd, 2) if final_rmssd is not None else None,
                 "lf_power": round(final_lf, 4) if final_lf is not None else None,
+                "blossom_count": sess.blossom_count,
+                "blossom_threshold": sess.blossom_threshold,
             }
         else:
             # find_prbf: multi-frequency sweep with cycle/stage structure

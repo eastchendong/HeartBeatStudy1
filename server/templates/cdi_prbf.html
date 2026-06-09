@@ -554,13 +554,12 @@
 <!-- ═══════════════════ START SCREEN ═══════════════════ -->
 <div id="start-screen" class="screen active">
   <div class="intro-card">
-    <h2>个性化共振频率测试</h2>
-    <p class="desc">
-      本测试将帮助您找到最佳的共振呼吸频率。系统会引导您在不同频率下呼吸，
-      并通过心率变异性（HRV）分析确定产生最高LF功率的频率。
+    <h2>共振呼吸训练</h2>
+    <p class="desc" id="intro-desc">
+      固定频率 0.1 Hz（6 bpm）共振呼吸，通过实时HRV反馈引导您进入共振状态。
     </p>
-    
-    <div class="protocol">
+
+    <div class="protocol" id="protocol-section" style="display:none">
       <h3>测试流程</h3>
       <div class="freq-grid">
         <div class="freq-item">8.0</div>
@@ -579,7 +578,7 @@
 
     <div class="form-group">
       <label>吸呼比例</label>
-      <div class="ratio-select">
+      <div class="ratio-select" id="ratio-select-group">
         <button type="button" class="ratio-btn" data-inhale="4" data-exhale="6">4:6</button>
         <button type="button" class="ratio-btn active" data-inhale="5" data-exhale="5">5:5</button>
         <button type="button" class="ratio-btn" data-inhale="6" data-exhale="4">6:4</button>
@@ -589,18 +588,18 @@
     <div class="form-group">
       <label>测试模式</label>
       <div class="ratio-select" id="mode-select">
-        <button type="button" class="ratio-btn active" data-mode="find_prbf">Find PRBF (扫频测试)</button>
-        <button type="button" class="ratio-btn" data-mode="control_group">Control Group (0.1Hz共振)</button>
+        <button type="button" class="ratio-btn active" data-mode="control_group">Control Group (0.1Hz共振)</button>
         <button type="button" class="ratio-btn" data-mode="baseline">Baseline (无视觉引导)</button>
+        <button type="button" class="ratio-btn" data-mode="find_prbf">Find PRBF (扫频测试)</button>
       </div>
     </div>
 
-    <div class="form-group" id="duration-group" style="display:none">
+    <div class="form-group" id="duration-group">
       <label>测试时长 (分钟)</label>
-      <input type="number" id="test-duration" value="6" min="1" max="30" step="1" />
+      <input type="number" id="test-duration" value="7" min="1" max="30" step="1" />
     </div>
 
-    <div class="form-group" id="lf-threshold-group" style="display:none">
+    <div class="form-group" id="lf-threshold-group">
       <label>LF Power 激励阈值 (ms²)</label>
       <input type="number" id="lf-threshold" value="500" min="100" max="2000" step="50" />
     </div>
@@ -612,7 +611,8 @@
 <!-- ═══════════════════ TEST SCREEN ═══════════════════ -->
 <div id="test-screen" class="screen">
   <canvas id="particle-canvas" style="position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:100"></canvas>
-  <!-- Progress stages -->
+
+  <!-- Progress stages (find_prbf only) -->
   <div class="stages-container">
     <div class="stages-header">
       <span class="stages-title">测试进度</span>
@@ -623,8 +623,20 @@
     </div>
   </div>
 
-  <!-- Current info -->
-  <div class="info-bar">
+  <!-- Breathing circle -->
+  <div class="circle-wrap" id="circle-wrap" style="overflow:visible">
+    <canvas id="ring-canvas" style="position:absolute;pointer-events:none;z-index:50"></canvas>
+    <div class="ring" id="ring-el"></div>
+    <svg class="arc-svg" viewBox="0 0 100 100">
+      <circle id="arc-track" cx="50" cy="50" r="47"/>
+      <circle id="arc-fill"  cx="50" cy="50" r="47" stroke-dasharray="295.3" stroke-dashoffset="295.3"/>
+    </svg>
+    <div id="breath-circle"></div>
+    <span id="phase-text">–</span>
+  </div>
+
+  <!-- Metrics: info bars below the circle -->
+  <div class="info-bar" id="find-prbf-info-bar">
     <div class="info-item">
       <div class="label">当前频率</div>
       <div class="value" id="freq-value">--</div>
@@ -648,7 +660,7 @@
     </div>
   </div>
 
-  <div class="info-bar">
+  <div class="info-bar" id="metrics-bar">
     <div class="info-item">
       <div class="label">实时心率</div>
       <div class="value" id="bpm-value">--</div>
@@ -666,7 +678,7 @@
     </div>
   </div>
 
-  <!-- Baseline timer (hidden by default) -->
+  <!-- Timer bar -->
   <div class="info-bar" id="baseline-timer-bar" style="display:none">
     <div class="info-item">
       <div class="label">剩余时间</div>
@@ -688,17 +700,6 @@
       <div class="value" id="blossom-count" style="color:#f778ba">0/5</div>
       <div class="unit">LF Power</div>
     </div>
-  </div>
-
-  <!-- Breathing circle (control_group only) -->
-  <div class="circle-wrap" id="circle-wrap">
-    <div class="ring" id="ring-el"></div>
-    <svg class="arc-svg" viewBox="0 0 100 100">
-      <circle id="arc-track" cx="50" cy="50" r="47"/>
-      <circle id="arc-fill"  cx="50" cy="50" r="47" stroke-dasharray="295.3" stroke-dashoffset="295.3"/>
-    </svg>
-    <div id="breath-circle"></div>
-    <span id="phase-text">–</span>
   </div>
 
   <button id="stop-btn">停止测试</button>
@@ -831,8 +832,8 @@ let testState = {
 
 let inhaleRatio = 5;
 let exhaleRatio = 5;
-let testMode = 'find_prbf';  // 'find_prbf', 'control_group', or 'baseline'
-let testDuration = 6;        // minutes (for control_group and baseline)
+let testMode = 'control_group';  // 'control_group', 'baseline', or 'find_prbf'
+let testDuration = 7;            // minutes default for control_group
 
 // Animation state
 let animFrame = null;
@@ -853,6 +854,7 @@ let blossomEffect = null;
 let blossomInterval = null;
 let lastLfFromSSE = null;
 let lastRrFromSSE = null;
+let persistentRing = null;  // PersistentParticleRing instance
 
 // Live stats tracker (control_group only)
 let statsTracker = null;
@@ -1148,7 +1150,8 @@ async function startFindPrbfTest() {
   document.getElementById('stats-tracker-container').style.display = 'none';
   document.getElementById('circle-wrap').style.display = '';
   document.querySelector('.stages-container').style.display = '';
-  document.querySelectorAll('.info-bar')[0].style.display = '';
+  document.getElementById('find-prbf-info-bar').style.display = '';
+  document.getElementById('metrics-bar').style.display = '';
   document.getElementById('freq-value').parentElement.style.display = '';
   document.getElementById('cycle-value').parentElement.style.display = '';
   const cycleIndicatorParent = document.querySelector('.cycle-indicator').parentElement.parentElement;
@@ -1167,6 +1170,20 @@ async function startControlGroupTest() {
   const particleCanvas = document.getElementById('particle-canvas');
   blossomEffect = new window.LFBlossomEffect(particleCanvas, { threshold: lfThreshold });
   blossomEffect.startSession();
+
+  // Init persistent particle ring around the breathing circle
+  const ringCanvas = document.getElementById('ring-canvas');
+  const circleWrap = document.getElementById('circle-wrap');
+  if (window.PersistentParticleRing) {
+    persistentRing = new window.PersistentParticleRing(ringCanvas, circleWrap, {
+      totalParticles: 100,
+      maxStage: 5,
+      ringOffset: 35,
+      overflowMargin: 55,
+      fadeDuration: 1.2,
+    });
+    persistentRing.start();
+  }
 
   // Init time-series data collection
   const sessionStartTs = performance.now() / 1000;
@@ -1191,6 +1208,12 @@ async function startControlGroupTest() {
     if (blossomEffect && lastLfFromSSE !== null) {
       const result = blossomEffect.update(lastLfFromSSE);
       updateBlossomUI(result);
+      // Sync persistent ring stage + notify server on trigger
+      if (result.triggered) {
+        if (persistentRing) persistentRing.setStage(result.count);
+        // Notify server of blossom event (fire-and-forget)
+        fetch(api('/api/cdi-prbf/blossom-event'), { method: 'POST' }).catch(() => {});
+      }
     }
     // Feed live stats tracker
     if (statsTracker) {
@@ -1243,8 +1266,8 @@ async function startControlGroupTest() {
   document.getElementById('circle-wrap').style.display = '';
   document.getElementById('debug-panel').style.display = '';
   document.querySelector('.stages-container').style.display = 'none';
-  document.querySelectorAll('.info-bar')[0].style.display = 'none';
-  document.querySelectorAll('.info-bar')[1].style.display = '';
+  document.getElementById('find-prbf-info-bar').style.display = 'none';
+  document.getElementById('metrics-bar').style.display = '';
 
   // Re-size blossom canvas now that the screen is visible
   if (blossomEffect) blossomEffect.resize();
@@ -1265,9 +1288,13 @@ function debugResetColor() {
 }
 
 function debugTriggerBlossom() {
-  if (blossomEffect) {
-    blossomEffect._spawnParticles();
-  }
+  if (!blossomEffect) return;
+  if (blossomEffect.blossomCount >= blossomEffect.config.maxBlossoms) return;
+  // Force trigger: burst particles + persistent ring
+  blossomEffect._triggerBlossom();
+  updateBlossomUI({ count: blossomEffect.blossomCount, progress: blossomEffect.progress });
+  if (persistentRing) persistentRing.setStage(blossomEffect.blossomCount);
+  fetch(api('/api/cdi-prbf/blossom-event'), { method: 'POST' }).catch(() => {});
 }
 
 function updateBlossomUI(result) {
@@ -1352,6 +1379,9 @@ function updateBaselineTimerDisplay() {
 
 async function onTimerComplete() {
   stopBreathing();
+  if (persistentRing) {
+    persistentRing.stop();
+  }
   await fetch(api('/api/cdi-prbf/on-baseline-complete'), { method: 'POST' });
   testState.isRunning = false;
   showTimerResults();
@@ -1373,6 +1403,11 @@ async function stopTest() {
     statsTracker.stop();
     statsTracker = null;
   }
+  if (persistentRing) {
+    persistentRing.stop();
+    persistentRing.setStage(0);
+    persistentRing = null;
+  }
   await fetch(api('/api/cdi-prbf/stop'), { method: 'POST' });
   await fetch(api('/api/cdi-prbf/reset'), { method: 'POST' });
 
@@ -1382,6 +1417,7 @@ async function stopTest() {
   lastLfFromSSE = null;
   lastRrFromSSE = null;
   statsTracker = null;
+  persistentRing = null;
   debugForceColorLevel = -1;
   showScreen('start');
 }
@@ -1782,25 +1818,59 @@ document.querySelectorAll('#mode-select .ratio-btn').forEach(btn => {
     document.querySelectorAll('#mode-select .ratio-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     testMode = btn.dataset.mode;
-    // Show duration + LF threshold for control_group only
-    const showTimerOpts = (testMode === 'control_group' || testMode === 'baseline');
-    document.getElementById('duration-group').style.display = showTimerOpts ? '' : 'none';
-    document.getElementById('lf-threshold-group').style.display = testMode === 'control_group' ? '' : 'none';
-    // Show/hide ratio selector (only for find_prbf)
-    const ratioEls = document.querySelectorAll('#start-screen .ratio-btn');
-    ratioEls.forEach(b => {
-      if (b.dataset.inhale !== undefined) {
-        b.parentElement.parentElement.style.display = testMode === 'find_prbf' ? '' : 'none';
-      }
-    });
+
+    // Protocol section: only for find_prbf
+    document.getElementById('protocol-section').style.display =
+      testMode === 'find_prbf' ? '' : 'none';
+
+    // Duration group: visible for control_group and baseline, hidden for find_prbf
+    const showTimer = (testMode === 'control_group' || testMode === 'baseline');
+    document.getElementById('duration-group').style.display = showTimer ? '' : 'none';
+
+    // LF threshold: only for control_group
+    document.getElementById('lf-threshold-group').style.display =
+      testMode === 'control_group' ? '' : 'none';
+
+    // Set per-mode duration defaults
+    const durInput = document.getElementById('test-duration');
+    if (testMode === 'control_group') {
+      testDuration = 7;
+    } else if (testMode === 'baseline') {
+      testDuration = 5;
+    } else {
+      testDuration = 10; // find_prbf has fixed 10-min sweep
+    }
+    durInput.value = testDuration;
+
+    // Update intro description
+    const descEl = document.getElementById('intro-desc');
+    if (testMode === 'control_group') {
+      descEl.textContent = '固定频率 0.1 Hz（6 bpm）共振呼吸，通过实时HRV反馈引导您进入共振状态。';
+    } else if (testMode === 'baseline') {
+      descEl.textContent = '无视觉引导的基线测试，用于采集静息状态下的心率变异性数据。';
+    } else {
+      descEl.textContent = '本测试将帮助您找到最佳的共振呼吸频率。系统会引导您在不同频率下呼吸，并通过心率变异性（HRV）分析确定产生最高LF功率的频率。';
+    }
+
+    // Ratio selector: only for find_prbf
+    document.getElementById('ratio-select-group').parentElement.style.display =
+      testMode === 'find_prbf' ? '' : 'none';
   });
 });
 
 // Duration input
 document.getElementById('test-duration').addEventListener('change', function() {
-  testDuration = Math.max(1, Math.min(30, parseInt(this.value) || 6));
+  testDuration = Math.max(1, Math.min(30, parseInt(this.value) || testDuration));
   this.value = testDuration;
 });
+
+// Set initial UI state for default mode (control_group)
+(function initModeUI() {
+  document.getElementById('protocol-section').style.display = 'none';
+  document.getElementById('duration-group').style.display = '';
+  document.getElementById('lf-threshold-group').style.display = '';
+  document.getElementById('ratio-select-group').parentElement.style.display = 'none';
+})();
 
 // BLE relay buttons
 document.getElementById('relay-connect-btn').addEventListener('click', async () => {

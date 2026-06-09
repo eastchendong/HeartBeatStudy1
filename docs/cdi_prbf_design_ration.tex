@@ -361,6 +361,125 @@ to be visually distinct from the breathing circle's blue-green palette,
 ensuring the reward event is perceptually salient without being
 confusable with the continuous guidance channels.
 
+\subsection{Persistent Particle Ring}
+
+While the transient burst provides an immediate reward event, it
+disappears within seconds and leaves no lasting trace of the user's
+cumulative progress across the session. A \textit{persistent particle
+ring} is therefore maintained around the breathing circle as a durable,
+ambient progress indicator.
+
+\subsubsection{Stage Model}
+
+The ring has $M + 1 = 6$ discrete visual states ($0$ through $5$),
+corresponding to the number of bursts earned so far in the session:
+
+\[
+\text{stage} = \text{blossomCount} \in \{0, 1, 2, 3, 4, 5\}.
+\]
+
+Each stage adds a fixed set of particles to the ring, so that the visual
+density grows monotonically with cumulative achievement. Stage~0 shows
+an empty ring (no persistent particles); stage~5 shows the full
+complement.
+
+\subsubsection{Particle Allocation}
+
+Let $Q$ be the total number of persistent particles at stage~5 (default
+$Q = 60$). Particles are distributed evenly across stages, with the
+number of particles active at stage $s$ given by
+
+\[
+N_{\text{persist}}(s) = \left\lfloor \frac{s}{M} \cdot Q \right\rfloor,
+\]
+
+so that $N_{\text{persist}}(0) = 0$, $N_{\text{persist}}(5) = Q$, and
+each burst adds approximately $Q / M = 12$ new particles to the ring.
+
+\subsubsection{Placement and Kinematics}
+
+Each persistent particle $i$ is assigned a fixed angular home position
+$\phi_i$ uniformly distributed around the full circumference:
+
+\[
+\phi_i = \frac{2\pi i}{Q}, \quad i = 0, \dots, Q-1.
+\]
+
+The particle orbits at a radial distance $R_{\text{ring}}$ from the
+circle centre, where
+
+\[
+R_{\text{ring}} = R_{\text{circle}} + \Delta R, \quad \Delta R = 28\ \text{px},
+\]
+
+placing the ring just outside the breathing circle's outer stroke.
+
+Rather than remaining static, each active particle executes a gentle
+\textit{orbital drift}:
+
+\begin{align*}
+  \theta_i(t) &= \phi_i + \omega_i \cdot t + A_i \cdot \sin(\omega_{\text{sway}} \cdot t + \psi_i), \\
+  r_i(t) &= R_{\text{ring}} + B_i \cdot \sin(\omega_{\text{radial}} \cdot t + \xi_i),
+\end{align*}
+
+where
+\begin{itemize}
+  \item $\omega_i \sim \mathcal{U}(0.05, 0.20)$ rad/s — slow tangential drift,
+  \item $A_i \sim \mathcal{U}(0.03, 0.10)$ rad — small azimuthal sway,
+  \item $B_i \sim \mathcal{U}(2, 8)$ px — radial breathing,
+  \item $\omega_{\text{sway}}, \omega_{\text{radial}} \sim \mathcal{U}(0.3, 0.7)$ rad/s,
+  \item $\psi_i, \xi_i \sim \mathcal{U}(0, 2\pi)$ — random phase offsets.
+\end{itemize}
+
+These dynamics keep the particles perceptibly alive without distracting
+from the primary breathing cue; the motion amplitude is deliberately
+small (sub-pixel to a few pixels per frame at 60~fps).
+
+\subsubsection{Stage Transitions}
+
+When a burst fires and the stage increments from $s$ to $s+1$, the
+newly activated particles do not appear instantaneously. Instead they
+\textit{fade in} over $T_{\text{fade}} = 1.2$~seconds, with opacity
+$\alpha_i(t)$ ramped from 0 to the nominal value $\alpha_0 = 0.75$
+via an ease-out curve:
+
+\[
+\alpha_i(t) = \alpha_0 \cdot \left(1 - (1 - p)^3\right), \quad
+p = \min\!\left(1,\; \frac{t - t_{\text{trigger}}}{T_{\text{fade}}}\right).
+\]
+
+This staggered emergence creates a soft, organic growth of the ring
+rather than a jarring pop-in.
+
+\subsubsection{Rendering}
+
+Active persistent particles are rendered as small luminous dots:
+
+\begin{itemize}
+  \item \textbf{Size:} $d = 6$~px diameter.
+  \item \textbf{Colour:} HSL hue matching the most recent burst palette
+    ($H \sim \mathcal{U}(190, 270)$), with saturation 70\,\% and
+    lightness $65\% + 15\% \cdot \sin(\omega_i t + \phi_i)$ for a subtle
+    shimmer.
+  \item \textbf{Glow:} 8~px \texttt{box-shadow} at 40\,\% opacity.
+  \item \textbf{Inactive particles} (stages not yet reached) are not
+    rendered at all — there is no placeholder or ``empty slot.''
+\end{itemize}
+
+\paragraph{Rationale.}
+A transient burst alone creates a ``what just happened?'' problem: if
+the user blinks or looks away during the 2--3~second animation, the
+reward is missed entirely. The persistent ring solves this by providing
+a continuously visible record of session progress — the user can glance
+at the circle at any time and immediately see how many resonance events
+they have achieved. The five-stage build-up from empty to full leverages
+the \textit{endowed progress effect}: visible accumulation toward a
+known maximum ($M = 5$) motivates continued engagement, as each earned
+particle cluster both rewards past performance and signals proximity to
+completion. The small orbital motion prevents the ring from being
+mistaken for a static UI decoration, while staying subtle enough to
+avoid competing with the breathing pacing cue.
+
 %-------------------------------------------------------------------------------
 \begin{thebibliography}{1}
 

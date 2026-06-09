@@ -76,6 +76,12 @@ class SessionState:
         self.relay_process: Optional[subprocess.Popen] = None
         self.relay_device_keyword: Optional[str] = None
 
+        # ── Blossom reward state (LF-power particle burst + persistent ring) ────
+        self.blossom_count: int = 0           # 0–5, total bursts earned this session
+        self.blossom_streak: int = 0          # consecutive LF readings above threshold
+        self.last_blossom_time: float = -999  # session-relative time of last burst
+        self.blossom_threshold: float = 500.0 # LF power threshold (ms^2)
+
         # ── Buteyko state ──────────────────────────────────────────────────────
         self.buteyko_config: dict = {
             "bolt_seconds": None,
