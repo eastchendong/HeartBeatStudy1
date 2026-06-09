@@ -854,6 +854,7 @@ let baselineStartTime = null;
 // LF Blossom (control_group only)
 let blossomEffect = null;
 let blossomInterval = null;
+let coherenceTimer = null;   // 500 ms coherence-update timer (RSAAnalyzer cadence)
 let lastLfFromSSE = null;
 let lastRrFromSSE = null;
 let persistentRing = null;  // PersistentParticleRing instance
@@ -1040,6 +1041,7 @@ function animate(ts) {
     if (next === 'inhale') {
       // Full cycle complete
       onCycleComplete();
+      if (coherenceTracker) coherenceTracker.endCycle();
     }
     startPhase(next, ts);
   }
@@ -1199,7 +1201,17 @@ async function startControlGroupTest() {
   const sessionStartTs = performance.now() / 1000;
   controlGroupData = { bpm: [], rr: [], lf: [], coherence: [], timestamps: [] };
 
-  // Check blossom + record data every 1s
+  // Coherence update at 2 Hz (0.5 s) — matches RSAAnalyzer.UpdateCoherence() cadence
+  coherenceTimer = setInterval(() => {
+    if (coherenceTracker && lastBpmFromSSE > 0) {
+      coherenceTracker.update(lastBpmFromSSE, performance.now() / 1000, 0, 0.1);
+      const coh = coherenceTracker.smoothedCoherence.toFixed(3);
+      document.getElementById('coherence-score').textContent = coh;
+      document.getElementById('debug-coherence-val').textContent = coh;
+    }
+  }, 500);
+
+  // Data recording + blossom checks at 1 Hz
   blossomInterval = setInterval(() => {
     const elapsed = Math.round(performance.now() / 1000 - sessionStartTs);
     controlGroupData.timestamps.push(elapsed);
@@ -1209,12 +1221,6 @@ async function startControlGroupTest() {
     controlGroupData.coherence.push(
       coherenceTracker ? coherenceTracker.smoothedCoherence : 0
     );
-    // Update coherence + debug display
-    if (coherenceTracker) {
-      const coh = coherenceTracker.smoothedCoherence.toFixed(3);
-      document.getElementById('coherence-score').textContent = coh;
-      document.getElementById('debug-coherence-val').textContent = coh;
-    }
     document.getElementById('debug-lf-val').textContent = (lastLfFromSSE || 0).toFixed(1);
     if (blossomEffect && lastLfFromSSE !== null) {
       const result = blossomEffect.update(lastLfFromSSE);
@@ -1328,16 +1334,20 @@ async function startBaselineTest() {
   const sessionStartTs = performance.now() / 1000;
   controlGroupData = { bpm: [], rr: [], lf: [], coherence: [], timestamps: [] };
 
+  // Coherence update at 2 Hz (0.5 s) — matches RSAAnalyzer.UpdateCoherence() cadence
+  coherenceTimer = setInterval(() => {
+    if (coherenceTracker && lastBpmFromSSE > 0) {
+      coherenceTracker.update(lastBpmFromSSE, performance.now() / 1000, 0, 0.1);
+    }
+  }, 500);
+
+  // Data recording at 1 Hz
   blossomInterval = setInterval(() => {
     const elapsed = Math.round(performance.now() / 1000 - sessionStartTs);
     controlGroupData.timestamps.push(elapsed);
     controlGroupData.bpm.push(lastBpmFromSSE || 0);
     controlGroupData.rr.push(lastRrFromSSE || 0);
     controlGroupData.lf.push(lastLfFromSSE || 0);
-    // Feed coherence tracker (animation loop doesn't run in baseline)
-    if (coherenceTracker && lastBpmFromSSE) {
-      coherenceTracker.update(lastBpmFromSSE, performance.now() / 1000, 0, 0.1);
-    }
     controlGroupData.coherence.push(
       coherenceTracker ? coherenceTracker.smoothedCoherence : 0
     );
@@ -1402,16 +1412,20 @@ async function startDeepBreathingTest() {
   const sessionStartTs = performance.now() / 1000;
   controlGroupData = { bpm: [], rr: [], lf: [], coherence: [], timestamps: [] };
 
+  // Coherence update at 2 Hz (0.5 s) — matches RSAAnalyzer.UpdateCoherence() cadence
+  coherenceTimer = setInterval(() => {
+    if (coherenceTracker && lastBpmFromSSE > 0) {
+      coherenceTracker.update(lastBpmFromSSE, performance.now() / 1000, 0, 0.1);
+    }
+  }, 500);
+
+  // Data recording at 1 Hz
   blossomInterval = setInterval(() => {
     const elapsed = Math.round(performance.now() / 1000 - sessionStartTs);
     controlGroupData.timestamps.push(elapsed);
     controlGroupData.bpm.push(lastBpmFromSSE || 0);
     controlGroupData.rr.push(lastRrFromSSE || 0);
     controlGroupData.lf.push(lastLfFromSSE || 0);
-    // Feed coherence tracker (animation loop doesn't run in deep_breathing)
-    if (coherenceTracker && lastBpmFromSSE) {
-      coherenceTracker.update(lastBpmFromSSE, performance.now() / 1000, 0, 0.1);
-    }
     controlGroupData.coherence.push(
       coherenceTracker ? coherenceTracker.smoothedCoherence : 0
     );
@@ -1512,6 +1526,10 @@ async function stopTest() {
   if (blossomInterval) {
     clearInterval(blossomInterval);
     blossomInterval = null;
+  }
+  if (coherenceTimer) {
+    clearInterval(coherenceTimer);
+    coherenceTimer = null;
   }
   if (statsTracker) {
     statsTracker.stop();

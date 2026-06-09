@@ -524,6 +524,11 @@ def save_results():
         final_rmssd = compute_rmssd(rr_data)
         final_lf = compute_lf_power(rr_data)
 
+        # Initialize variables shared across mode branches
+        stage_results = []
+        best_result = None
+        cycle_rr_list = []
+
         if mode == "baseline" or mode == "deep_breathing":
             # Baseline / Deep Breathing: flat format, no visual guidance
             session_record = {
@@ -656,9 +661,9 @@ def save_results():
             "mirrored_to": mirrored_to,
             "summary": {
                 "mode": mode,
-                "total_cycles": len(cycle_rr_list) if mode not in ("baseline", "deep_breathing") else 0,
-                "total_stages": len(stage_results) if mode not in ("baseline", "deep_breathing") else 0,
+                "total_cycles": len(cycle_rr_list),
+                "total_stages": len(stage_results),
                 "bpm_avg": session_record["bpm_avg"],
-                "best_frequency": best_result.get("frequency") if mode not in ("baseline", "deep_breathing") and best_result else None,
+                "best_frequency": best_result.get("frequency") if best_result else None,
             },
         })

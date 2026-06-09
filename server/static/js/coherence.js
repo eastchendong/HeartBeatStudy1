@@ -19,13 +19,23 @@
  *   4. Compute guidance-band power (f_g ± 0.02 Hz) and total power (all bins
  *      except DC) from the averaged PSD.
  *   5. Raw entrainment score = P_band / P_total, clamped to [0, 1].
- *   6. EMA-smooth the score, then map to 4 colour levels with hysteresis.
+ *   6. EMA-smooth the score.
+ *   7. At the end of each breathing cycle, evaluate the smoothed score against
+ *      a single threshold ± hysteresis band, counting consecutive good/bad
+ *      cycles to drive colour-level transitions.
  *
  * Colour levels (white → black for AR glasses, where black = transparent):
- *   Level 0 (score < 0.4): White       rgb(255, 255, 255)
- *   Level 1 (score 0.4–0.6): Light Gray rgb(170, 170, 170)
- *   Level 2 (score 0.6–0.8): Dark Gray  rgb( 80,  80,  80)
- *   Level 3 (score ≥ 0.8):  Near Black  rgb( 20,  20,  20)
+ *   Level 0: White       rgb(255, 255, 255)
+ *   Level 1: Light Gray  rgb(170, 170, 170)
+ *   Level 2: Dark Gray   rgb( 80,  80,  80)
+ *   Level 3: Near Black  rgb( 20,  20,  20)
+ *
+ * Level transitions (after calibration delay, evaluated per breathing cycle):
+ *   Good cycle: smoothed score ≥ threshold + hysteresis → streak++
+ *   Bad  cycle: smoothed score <  threshold - hysteresis → streak++
+ *   Neutral:    threshold - hysteresis ≤ score < threshold + hysteresis
+ *               → both streaks reset, colour unchanged.
+ *   After streakRequired consecutive good/bad cycles → level up/down by 1.
  *
  * Usage:
  *   const tracker = new EntrainmentTracker();
@@ -37,10 +47,10 @@
 
   // White → Black gradient for AR glasses (black = transparent in AR)
   const COLOR_LEVELS = [
-    { name: 'White',      color: 'rgb(255, 255, 255)', scoreMin: 0.0 },
-    { name: 'Light Gray', color: 'rgb(170, 170, 170)', scoreMin: 0.4 },
-    { name: 'Dark Gray',  color: 'rgb( 80,  80,  80)', scoreMin: 0.6 },
-    { name: 'Near Black', color: 'rgb( 20,  20,  20)', scoreMin: 0.8 },
+    { name: 'White',      color: 'rgb(255, 255, 255)' },
+    { name: 'Light Gray', color: 'rgb(170, 170, 170)' },
+    { name: 'Dark Gray',  color: 'rgb( 80,  80,  80)' },
+    { name: 'Near Black', color: 'rgb( 20,  20,  20)' },
   ];
 
   class EntrainmentTracker {
@@ -54,9 +64,9 @@
      * @param {number} [opts.fftLen=256]           Zero-padded FFT length (power of 2)
      * @param {number} [opts.emaBlend=0.3]         EMA smoothing factor
      * @param {number} [opts.calibrationDelay=60]  Seconds before colour changes
-     * @param {number} [opts.levelUpStreak=3]      Consecutive good cycles to level up
-     * @param {number} [opts.levelDownStreak=3]    Consecutive bad cycles to level down
-     * @param {number} [opts.hysteresis=0.1]       ±threshold band for level transitions
+     * @param {number} [opts.threshold=0.5]        Central coherence threshold
+     * @param {number} [opts.hysteresis=0.05]      ±tolerance band around threshold
+     * @param {number} [opts.streakRequired=3]     Consecutive good/bad cycles for level change
      */
     constructor(opts) {
       opts = opts || {};
@@ -68,9 +78,9 @@
       this.fftLen           = opts.fftLen           || 256;
       this.emaBlend         = opts.emaBlend         || 0.3;
       this.calibrationDelay = opts.calibrationDelay || 60;
-      this.levelUpStreak    = opts.levelUpStreak    || 3;
-      this.levelDownStreak  = opts.levelDownStreak  || 3;
-      this.hysteresis       = opts.hysteresis       || 0.1;
+      this.threshold        = opts.threshold        || 0.5;
+      this.hysteresis       = opts.hysteresis       || 0.05;
+      this.streakRequired   = opts.streakRequired   || 3;
 
       // Pre-compute Hanning window for the segment length
       this._hanning = this._makeHanning(this.segmentLen);
@@ -148,11 +158,8 @@
       this.entrainmentScore =
         this.emaBlend * rawScore + (1 - this.emaBlend) * this.entrainmentScore;
 
-      // Colour-level update (after calibration delay)
-      const elapsed = timestamp - this.sessionStart;
-      if (elapsed >= this.calibrationDelay) {
-        this._updateColorLevel();
-      }
+      // Level transitions are evaluated per breathing cycle via endCycle(),
+      // not on every sample update.  Return the current state for display.
 
       return {
         coherence: this.entrainmentScore,
@@ -369,84 +376,57 @@
       }
     }
 
-    // ── Colour-level hysteresis ─────────────────────────────────────────────
+    // ── Per-cycle colour-level evaluation ────────────────────────────────────
 
     /**
-     * Update colour level with streak-based hysteresis.
+     * Called at the end of each breathing cycle to evaluate whether the
+     * colour level should change.
      *
-     * Thresholds (score → level):
-     *   Level 0: < 0.4          Level 2: 0.6 – 0.8
-     *   Level 1: 0.4 – 0.6      Level 3: ≥ 0.8
+     * Uses a single threshold ± hysteresis band shared across all levels:
+     *   score ≥ threshold + hysteresis  → good cycle (streak up)
+     *   score <  threshold - hysteresis  → bad  cycle (streak down)
+     *   otherwise                        → neutral (both streaks reset)
      *
-     * Each transition requires `levelUpStreak` / `levelDownStreak` consecutive
-     * values beyond the threshold ± hysteresis band.
+     * After `streakRequired` consecutive good/bad cycles, level moves by ±1.
+     */
+    endCycle() {
+      // Only evaluate after calibration delay
+      const elapsed = this.lastUpdateTime - this.sessionStart;
+      if (elapsed < this.calibrationDelay) {
+        return;
+      }
+      this._updateColorLevel();
+    }
+
+    /**
+     * Internal: apply single-threshold hysteresis to the current smoothed score.
      */
     _updateColorLevel() {
       const s = this.entrainmentScore;
-      const hys = this.hysteresis;
+      const upThreshold = this.threshold + this.hysteresis;
+      const downThreshold = this.threshold - this.hysteresis;
+      const maxLevel = COLOR_LEVELS.length - 1;
 
-      if (this.currentLevel >= 3) {
-        if (s < 0.8 - hys) {
-          this.badStreak++;
+      if (s >= upThreshold) {
+        // Good cycle
+        this.goodStreak++;
+        this.badStreak = 0;
+        if (this.goodStreak >= this.streakRequired && this.currentLevel < maxLevel) {
+          this.currentLevel++;
           this.goodStreak = 0;
-          if (this.badStreak >= this.levelDownStreak) {
-            this.currentLevel = 2;
-            this.badStreak = 0;
-          }
-        } else {
-          this.badStreak = 0;
         }
-      } else if (this.currentLevel === 2) {
-        if (s >= 0.8 + hys) {
-          this.goodStreak++;
-          this.badStreak = 0;
-          if (this.goodStreak >= this.levelUpStreak) {
-            this.currentLevel = 3;
-            this.goodStreak = 0;
-          }
-        } else if (s < 0.6 - hys) {
-          this.badStreak++;
-          this.goodStreak = 0;
-          if (this.badStreak >= this.levelDownStreak) {
-            this.currentLevel = 1;
-            this.badStreak = 0;
-          }
-        } else {
-          this.goodStreak = 0;
-          this.badStreak = 0;
-        }
-      } else if (this.currentLevel === 1) {
-        if (s >= 0.6 + hys) {
-          this.goodStreak++;
-          this.badStreak = 0;
-          if (this.goodStreak >= this.levelUpStreak) {
-            this.currentLevel = 2;
-            this.goodStreak = 0;
-          }
-        } else if (s < 0.4 - hys) {
-          this.badStreak++;
-          this.goodStreak = 0;
-          if (this.badStreak >= this.levelDownStreak) {
-            this.currentLevel = 0;
-            this.badStreak = 0;
-          }
-        } else {
-          this.goodStreak = 0;
+      } else if (s < downThreshold) {
+        // Bad cycle
+        this.badStreak++;
+        this.goodStreak = 0;
+        if (this.badStreak >= this.streakRequired && this.currentLevel > 0) {
+          this.currentLevel--;
           this.badStreak = 0;
         }
       } else {
-        // Level 0
-        if (s >= 0.4 + hys) {
-          this.goodStreak++;
-          this.badStreak = 0;
-          if (this.goodStreak >= this.levelUpStreak) {
-            this.currentLevel = 1;
-            this.goodStreak = 0;
-          }
-        } else {
-          this.goodStreak = 0;
-          this.badStreak = 0;
-        }
+        // Hysteresis dead zone — colour stays put, forget streak progress
+        this.goodStreak = 0;
+        this.badStreak = 0;
       }
     }
   }

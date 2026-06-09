@@ -126,24 +126,26 @@ def receive_pulse():
                 if hasattr(sess, 'current_cycle_rr'):
                     sess.current_cycle_rr.append(rr_val)
 
-        recent_rr = sess.rr_intervals[-120:] if len(sess.rr_intervals) > 120 else list(sess.rr_intervals)
-        computed_rmssd = compute_rmssd(recent_rr)
-        computed_lf    = compute_lf_power(recent_rr)
-
-        if computed_rmssd is not None:
-            sess.latest_rmssd = computed_rmssd
-            sess.hrv_window.append(computed_rmssd)
-        elif body and "hrv_rmssd" in body:
-            rmssd_val = float(body["hrv_rmssd"])
-            sess.hrv_window.append(rmssd_val)
-            sess.latest_rmssd = rmssd_val
-
-        if computed_lf is not None:
-            sess.latest_lf_power = computed_lf
-
-        sess.breath_cycle = _compute_cycle(sess, sess.latest_rmssd)
         is_paused  = sess.paused
         is_active  = sess.session_active
+
+        if is_active:
+            recent_rr = sess.rr_intervals[-120:] if len(sess.rr_intervals) > 120 else list(sess.rr_intervals)
+            computed_rmssd = compute_rmssd(recent_rr)
+            computed_lf    = compute_lf_power(recent_rr)
+
+            if computed_rmssd is not None:
+                sess.latest_rmssd = computed_rmssd
+                sess.hrv_window.append(computed_rmssd)
+            elif body and "hrv_rmssd" in body:
+                rmssd_val = float(body["hrv_rmssd"])
+                sess.hrv_window.append(rmssd_val)
+                sess.latest_rmssd = rmssd_val
+
+            if computed_lf is not None:
+                sess.latest_lf_power = computed_lf
+
+            sess.breath_cycle = _compute_cycle(sess, sess.latest_rmssd)
         snap_bpm   = avg_bpm
         snap_rmssd = sess.latest_rmssd
         snap_cycle = sess.breath_cycle
