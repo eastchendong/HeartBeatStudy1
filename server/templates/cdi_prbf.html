@@ -216,6 +216,7 @@
   
   /* Progress stages */
   .stages-container {
+    display: none;  /* Hidden by default; shown only for find_prbf */
     width: min(700px, 95vw);
     background: var(--surface);
     border: 1px solid var(--border);
@@ -1258,23 +1259,26 @@ async function startControlGroupTest() {
   testState.currentCycle = 0;
   testState.isRunning = true;
 
-  showScreen('test');
-
-  // Init stats tracker
-  const statsContainer = document.getElementById('stats-tracker-container');
-  statsContainer.style.display = '';
-  statsTracker = new window.LiveStatsTracker(statsContainer);
-  statsTracker.start();
-
-  // Show breathing circle, hide stages, show timer + debug
+  // Configure UI visibility BEFORE showing screen (avoids flash)
   document.getElementById('baseline-timer-bar').style.display = 'flex';
   document.getElementById('coherence-info').style.display = '';
   document.getElementById('blossom-info').style.display = '';
   document.getElementById('circle-wrap').style.display = '';
   document.getElementById('debug-panel').style.display = '';
-  document.querySelector('.stages-container').style.display = 'none';
   document.getElementById('find-prbf-info-bar').style.display = 'none';
   document.getElementById('metrics-bar').style.display = '';
+
+  showScreen('test');
+
+  // Init stats tracker
+  try {
+    const statsContainer = document.getElementById('stats-tracker-container');
+    statsContainer.style.display = '';
+    statsTracker = new window.LiveStatsTracker(statsContainer);
+    statsTracker.start();
+  } catch (e) {
+    console.warn('LiveStatsTracker init failed:', e);
+  }
 
   // Re-size blossom canvas now that the screen is visible
   if (blossomEffect) blossomEffect.resize();
@@ -1360,23 +1364,27 @@ async function startBaselineTest() {
   if (!data.ok) { alert('启动失败'); return; }
 
   testState.isRunning = true;
-  showScreen('test');
 
-  // Init stats tracker
-  const statsContainer = document.getElementById('stats-tracker-container');
-  statsContainer.style.display = '';
-  statsTracker = new window.LiveStatsTracker(statsContainer);
-  statsTracker.start();
-
-  // Show timer + metrics, hide circle + stages
+  // Configure UI visibility BEFORE showing screen
   document.getElementById('baseline-timer-bar').style.display = 'flex';
   document.getElementById('coherence-info').style.display = 'none';
   document.getElementById('blossom-info').style.display = 'none';
   document.getElementById('debug-panel').style.display = 'none';
   document.getElementById('circle-wrap').style.display = 'none';
-  document.querySelector('.stages-container').style.display = 'none';
   document.getElementById('find-prbf-info-bar').style.display = 'none';
   document.getElementById('metrics-bar').style.display = '';
+
+  showScreen('test');
+
+  // Init stats tracker
+  try {
+    const statsContainer = document.getElementById('stats-tracker-container');
+    statsContainer.style.display = '';
+    statsTracker = new window.LiveStatsTracker(statsContainer);
+    statsTracker.start();
+  } catch (e) {
+    console.warn('LiveStatsTracker init failed:', e);
+  }
 
   startBaselineTimer(durationSec);
 }
