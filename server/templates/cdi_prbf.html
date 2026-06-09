@@ -1187,13 +1187,14 @@ async function startControlGroupTest() {
 
   // Init time-series data collection
   const sessionStartTs = performance.now() / 1000;
-  controlGroupData = { bpm: [], lf: [], coherence: [], timestamps: [] };
+  controlGroupData = { bpm: [], rr: [], lf: [], coherence: [], timestamps: [] };
 
   // Check blossom + record data every 1s
   blossomInterval = setInterval(() => {
     const elapsed = Math.round(performance.now() / 1000 - sessionStartTs);
     controlGroupData.timestamps.push(elapsed);
     controlGroupData.bpm.push(lastBpmFromSSE || 0);
+    controlGroupData.rr.push(lastRrFromSSE || 0);
     controlGroupData.lf.push(lastLfFromSSE || 0);
     controlGroupData.coherence.push(
       coherenceTracker ? coherenceTracker.smoothedCoherence : 0
@@ -1307,18 +1308,35 @@ function updateBlossomUI(result) {
 // ── Baseline: no visual guidance ──────────────────────────────────────────
 async function startBaselineTest() {
   const durationSec = testDuration * 60;
-  coherenceTracker = null;
+  coherenceTracker = new window.RSACoherenceTracker();
   blossomEffect = null;
 
-  // Time-series data collection (BPM + LF only)
+  // Time-series data collection (BPM + RR + LF + Coherence)
   const sessionStartTs = performance.now() / 1000;
-  controlGroupData = { bpm: [], lf: [], coherence: [], timestamps: [] };
+  controlGroupData = { bpm: [], rr: [], lf: [], coherence: [], timestamps: [] };
 
   blossomInterval = setInterval(() => {
     const elapsed = Math.round(performance.now() / 1000 - sessionStartTs);
     controlGroupData.timestamps.push(elapsed);
     controlGroupData.bpm.push(lastBpmFromSSE || 0);
+    controlGroupData.rr.push(lastRrFromSSE || 0);
     controlGroupData.lf.push(lastLfFromSSE || 0);
+    // Feed coherence tracker (animation loop doesn't run in baseline)
+    if (coherenceTracker && lastBpmFromSSE) {
+      coherenceTracker.update(lastBpmFromSSE, performance.now() / 1000, 0, 0.1);
+    }
+    controlGroupData.coherence.push(
+      coherenceTracker ? coherenceTracker.smoothedCoherence : 0
+    );
+    // Feed live stats tracker
+    if (statsTracker) {
+      statsTracker.addDataPoint({
+        bpm: lastBpmFromSSE || 0,
+        rrInterval: lastRrFromSSE || 0,
+        coherence: coherenceTracker ? coherenceTracker.smoothedCoherence : 0,
+        lfPower: lastLfFromSSE || 0,
+      });
+    }
   }, 1000);
 
   await fetch(api('/api/cdi-prbf/configure'), {
@@ -1338,16 +1356,21 @@ async function startBaselineTest() {
   testState.isRunning = true;
   showScreen('test');
 
-  // Show timer only, hide everything else
+  // Init stats tracker
+  const statsContainer = document.getElementById('stats-tracker-container');
+  statsContainer.style.display = '';
+  statsTracker = new window.LiveStatsTracker(statsContainer);
+  statsTracker.start();
+
+  // Show timer + metrics, hide circle + stages
   document.getElementById('baseline-timer-bar').style.display = 'flex';
   document.getElementById('coherence-info').style.display = 'none';
   document.getElementById('blossom-info').style.display = 'none';
   document.getElementById('debug-panel').style.display = 'none';
-  document.getElementById('stats-tracker-container').style.display = 'none';
   document.getElementById('circle-wrap').style.display = 'none';
   document.querySelector('.stages-container').style.display = 'none';
-  document.querySelectorAll('.info-bar')[0].style.display = 'none';
-  document.querySelectorAll('.info-bar')[1].style.display = 'none';
+  document.getElementById('find-prbf-info-bar').style.display = 'none';
+  document.getElementById('metrics-bar').style.display = '';
 
   startBaselineTimer(durationSec);
 }
@@ -1484,7 +1507,7 @@ function showTimerResults() {
 }
 
 function showBaselineChartResults() {
-  const d = controlGroupData || { bpm: [], lf: [], timestamps: [] };
+  const d = controlGroupData || { bpm: [], rr: [], lf: [], coherence: [], timestamps: [] };
   const avgFn = arr => arr.length ? (arr.reduce((a, b) => a + b, 0) / arr.length) : 0;
 
   document.querySelector('.result-card.best-result').style.display = '';
@@ -1499,10 +1522,11 @@ function showBaselineChartResults() {
   document.getElementById('best-cycle').textContent = `${testDuration} 分钟`;
   document.getElementById('best-cycle-label').textContent = '时长';
 
-  // Simple stats: BPM and LF averages
   const validBpm = d.bpm.filter(v => v > 0);
   const avgBpm = validBpm.length ? (validBpm.reduce((a, b) => a + b, 0) / validBpm.length) : 0;
+  const avgRr = avgFn(d.rr.filter(v => v > 0));
   const avgLf = avgFn(d.lf);
+  const avgCoherence = avgFn(d.coherence);
 
   document.getElementById('results-stats').innerHTML = `
     <div class="chart-summary">
@@ -1512,9 +1536,19 @@ function showBaselineChartResults() {
         <div style="font-size:0.7rem;color:var(--muted)">BPM</div>
       </div>
       <div class="chart-stat">
+        <div class="label">平均 RR 间期</div>
+        <div class="value" style="color:var(--accent)">${avgRr.toFixed(0)}</div>
+        <div style="font-size:0.7rem;color:var(--muted)">ms</div>
+      </div>
+      <div class="chart-stat">
         <div class="label">平均 LF Power</div>
         <div class="value" style="color:var(--green)">${avgLf.toFixed(2)}</div>
         <div style="font-size:0.7rem;color:var(--muted)">ms²</div>
+      </div>
+      <div class="chart-stat">
+        <div class="label">平均 Coherence</div>
+        <div class="value" style="color:#58a6ff">${avgCoherence.toFixed(3)}</div>
+        <div style="font-size:0.7rem;color:var(--muted)">0–1</div>
       </div>
     </div>
   `;
@@ -1526,9 +1560,17 @@ function showBaselineChartResults() {
       <h4>心率 (BPM)</h4>
       ${buildSvgChart(d.timestamps, d.bpm.filter(v => v > 0), '#f85149', 'BPM')}
     </div>
-    <div class="chart-card">
+    <div class="chart-card" style="margin-bottom:1rem">
+      <h4>RR 间期 (ms)</h4>
+      ${buildSvgChart(d.timestamps, d.rr.filter(v => v > 0), '#a371f7', 'ms')}
+    </div>
+    <div class="chart-card" style="margin-bottom:1rem">
       <h4>LF Power (ms²)</h4>
       ${buildSvgChart(d.timestamps, d.lf, '#3fb950', 'ms²')}
+    </div>
+    <div class="chart-card">
+      <h4>Coherence Score</h4>
+      ${buildSvgChart(d.timestamps, d.coherence, '#58a6ff', '')}
     </div>
   `;
 
@@ -1536,13 +1578,14 @@ function showBaselineChartResults() {
 }
 
 function showControlGroupResults() {
-  const d = controlGroupData || { bpm: [], lf: [], coherence: [], timestamps: [] };
+  const d = controlGroupData || { bpm: [], rr: [], lf: [], coherence: [], timestamps: [] };
   const blossomCount = blossomEffect ? blossomEffect.blossomCount : 0;
 
   // Compute summary stats
   const avgFn = arr => arr.length ? (arr.reduce((a, b) => a + b, 0) / arr.length) : 0;
   const maxFn = arr => arr.length ? Math.max(...arr) : 0;
   const avgBpm = avgFn(d.bpm.filter(v => v > 0));
+  const avgRr = avgFn(d.rr.filter(v => v > 0));
   const maxLf = maxFn(d.lf);
   const avgCoherence = avgFn(d.coherence);
 
@@ -1551,10 +1594,9 @@ function showControlGroupResults() {
   document.querySelectorAll('.result-card')[1].style.display = '';
 
   // Update best-result card
-  const isBaseline = testMode === 'baseline';
-  document.getElementById('results-title').textContent = isBaseline ? 'Baseline 测试结果' : 'Control Group 测试结果';
-  document.getElementById('best-freq').textContent = isBaseline ? '无视觉引导' : '0.1 Hz 共振呼吸';
-  document.getElementById('best-freq-label').textContent = isBaseline ? '模式' : '固定频率';
+  document.getElementById('results-title').textContent = 'Control Group 测试结果';
+  document.getElementById('best-freq').textContent = '0.1 Hz 共振呼吸';
+  document.getElementById('best-freq-label').textContent = '固定频率';
   document.getElementById('best-cycle').textContent = `${testDuration} 分钟`;
   document.getElementById('best-cycle-label').textContent = '测试时长';
 
@@ -1567,13 +1609,18 @@ function showControlGroupResults() {
         <div style="font-size:0.7rem;color:var(--muted)">BPM</div>
       </div>
       <div class="chart-stat">
+        <div class="label">平均 RR 间期</div>
+        <div class="value" style="color:#a371f7">${avgRr.toFixed(0)}</div>
+        <div style="font-size:0.7rem;color:var(--muted)">ms</div>
+      </div>
+      <div class="chart-stat">
         <div class="label">最大 LF Power</div>
         <div class="value" style="color:var(--green)">${maxLf.toFixed(2)}</div>
         <div style="font-size:0.7rem;color:var(--muted)">ms²</div>
       </div>
       <div class="chart-stat">
         <div class="label">平均 Coherence</div>
-        <div class="value" style="color:var(--accent)">${avgCoherence.toFixed(3)}</div>
+        <div class="value" style="color:#58a6ff">${avgCoherence.toFixed(3)}</div>
         <div style="font-size:0.7rem;color:var(--muted)">0–1</div>
       </div>
       <div class="chart-stat">
@@ -1592,6 +1639,10 @@ function showControlGroupResults() {
     <div class="chart-card" style="margin-bottom:1rem">
       <h4>心率 (BPM)</h4>
       ${buildSvgChart(d.timestamps, d.bpm.filter(v => v > 0), '#f85149', 'BPM')}
+    </div>
+    <div class="chart-card" style="margin-bottom:1rem">
+      <h4>RR 间期 (ms)</h4>
+      ${buildSvgChart(d.timestamps, d.rr.filter(v => v > 0), '#a371f7', 'ms')}
     </div>
     <div class="chart-card" style="margin-bottom:1rem">
       <h4>LF Power (ms²)</h4>
