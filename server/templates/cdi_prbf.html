@@ -1911,10 +1911,18 @@ async function saveResults() {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout
 
+    const saveBody = { username: USERNAME };
+    // Include time-series data for control_group mode
+    if (testMode === 'control_group' && controlGroupData) {
+      saveBody.lf_power_series = controlGroupData.lf;
+      saveBody.coherence_series = controlGroupData.coherence;
+      saveBody.series_timestamps = controlGroupData.timestamps;
+    }
+
     const resp = await fetch(api('/api/cdi-prbf/save'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: USERNAME }),
+      body: JSON.stringify(saveBody),
       signal: controller.signal
     });
 

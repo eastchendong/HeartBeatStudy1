@@ -578,6 +578,10 @@ def save_results():
                 "lf_power": round(final_lf, 4) if final_lf is not None else None,
                 "blossom_count": sess.blossom_count,
                 "blossom_threshold": sess.blossom_threshold,
+                # Frontend time-series (1 Hz sampling during the session)
+                "lf_power_series": data.get("lf_power_series", []),
+                "coherence_series": data.get("coherence_series", []),
+                "series_timestamps": data.get("series_timestamps", []),
             }
         else:
             # find_prbf: multi-frequency sweep with cycle/stage structure
