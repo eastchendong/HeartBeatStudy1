@@ -134,11 +134,11 @@ def start_test():
         sess.blossom_streak = 0
         sess.last_blossom_time = -999
 
-        if mode == "baseline":
+        if mode == "baseline" or mode == "deep_breathing":
             duration = cdi_config.get("duration", 360)
             return jsonify({
                 "ok": True,
-                "mode": "baseline",
+                "mode": mode,
                 "duration": duration,
             })
         elif mode == "control_group":
@@ -524,18 +524,18 @@ def save_results():
         final_rmssd = compute_rmssd(rr_data)
         final_lf = compute_lf_power(rr_data)
 
-        if mode == "baseline":
-            # Baseline: flat format, no visual guidance
+        if mode == "baseline" or mode == "deep_breathing":
+            # Baseline / Deep Breathing: flat format, no visual guidance
             session_record = {
                 "id": str(uuid.uuid4()),
                 "session_id": sess.session_id,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "username": username,
                 "training_type": "cdi_prbf",
-                "sub_type": "baseline",
+                "sub_type": mode,
                 "tag": "同济设创数据",
                 "config": {
-                    "mode": "baseline",
+                    "mode": mode,
                     "duration": cdi_config.get("duration", 360),
                 },
                 "rr_intervals_ms": rr_data,
@@ -652,9 +652,9 @@ def save_results():
             "mirrored_to": mirrored_to,
             "summary": {
                 "mode": mode,
-                "total_cycles": len(cycle_rr_list) if mode != "baseline" else 0,
-                "total_stages": len(stage_results) if mode != "baseline" else 0,
+                "total_cycles": len(cycle_rr_list) if mode not in ("baseline", "deep_breathing") else 0,
+                "total_stages": len(stage_results) if mode not in ("baseline", "deep_breathing") else 0,
                 "bpm_avg": session_record["bpm_avg"],
-                "best_frequency": best_result.get("frequency") if mode != "baseline" and best_result else None,
+                "best_frequency": best_result.get("frequency") if mode not in ("baseline", "deep_breathing") and best_result else None,
             },
         })

@@ -591,6 +591,7 @@
       <div class="ratio-select" id="mode-select">
         <button type="button" class="ratio-btn active" data-mode="control_group">Control Group (0.1Hz共振)</button>
         <button type="button" class="ratio-btn" data-mode="baseline">Baseline (无视觉引导)</button>
+        <button type="button" class="ratio-btn" data-mode="deep_breathing">深呼吸 (无视觉辅助)</button>
         <button type="button" class="ratio-btn" data-mode="find_prbf">Find PRBF (扫频测试)</button>
       </div>
     </div>
@@ -984,7 +985,7 @@ function applyCoherenceColor() {
 }
 
 function applyPhaseColor(phase) {
-  if (testMode === 'baseline') return;
+  if (testMode === 'baseline' || testMode === 'deep_breathing') return;
 
   if (coherenceTracker) {
     // Control group: coherence-based color
@@ -1115,8 +1116,10 @@ async function startTest() {
     await startFindPrbfTest();
   } else if (testMode === 'control_group') {
     await startControlGroupTest();
-  } else {
+  } else if (testMode === 'baseline') {
     await startBaselineTest();
+  } else if (testMode === 'deep_breathing') {
+    await startDeepBreathingTest();
   }
 }
 
@@ -1389,6 +1392,80 @@ async function startBaselineTest() {
   startBaselineTimer(durationSec);
 }
 
+// ── Deep Breathing: like baseline, no visual guidance, subject breathes deeply freely ──
+async function startDeepBreathingTest() {
+  const durationSec = testDuration * 60;
+  coherenceTracker = new window.RSACoherenceTracker();
+  blossomEffect = null;
+
+  // Time-series data collection (BPM + RR + LF + Coherence)
+  const sessionStartTs = performance.now() / 1000;
+  controlGroupData = { bpm: [], rr: [], lf: [], coherence: [], timestamps: [] };
+
+  blossomInterval = setInterval(() => {
+    const elapsed = Math.round(performance.now() / 1000 - sessionStartTs);
+    controlGroupData.timestamps.push(elapsed);
+    controlGroupData.bpm.push(lastBpmFromSSE || 0);
+    controlGroupData.rr.push(lastRrFromSSE || 0);
+    controlGroupData.lf.push(lastLfFromSSE || 0);
+    // Feed coherence tracker (animation loop doesn't run in deep_breathing)
+    if (coherenceTracker && lastBpmFromSSE) {
+      coherenceTracker.update(lastBpmFromSSE, performance.now() / 1000, 0, 0.1);
+    }
+    controlGroupData.coherence.push(
+      coherenceTracker ? coherenceTracker.smoothedCoherence : 0
+    );
+    // Feed live stats tracker
+    if (statsTracker) {
+      statsTracker.addDataPoint({
+        bpm: lastBpmFromSSE || 0,
+        rrInterval: lastRrFromSSE || 0,
+        coherence: coherenceTracker ? coherenceTracker.smoothedCoherence : 0,
+        lfPower: lastLfFromSSE || 0,
+      });
+    }
+  }, 1000);
+
+  await fetch(api('/api/cdi-prbf/configure'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      mode: 'deep_breathing',
+      duration: durationSec,
+      username: USERNAME,
+    })
+  });
+
+  const resp = await fetch(api('/api/cdi-prbf/start'), { method: 'POST' });
+  const data = await resp.json();
+  if (!data.ok) { alert('启动失败'); return; }
+
+  testState.isRunning = true;
+
+  // Configure UI visibility BEFORE showing screen (same as baseline: no circle, no visual)
+  document.getElementById('baseline-timer-bar').style.display = 'flex';
+  document.getElementById('coherence-info').style.display = 'none';
+  document.getElementById('blossom-info').style.display = 'none';
+  document.getElementById('debug-panel').style.display = 'none';
+  document.getElementById('circle-wrap').style.display = 'none';
+  document.getElementById('find-prbf-info-bar').style.display = 'none';
+  document.getElementById('metrics-bar').style.display = '';
+
+  showScreen('test');
+
+  // Init stats tracker
+  try {
+    const statsContainer = document.getElementById('stats-tracker-container');
+    statsContainer.style.display = '';
+    statsTracker = new window.LiveStatsTracker(statsContainer);
+    statsTracker.start();
+  } catch (e) {
+    console.warn('LiveStatsTracker init failed:', e);
+  }
+
+  startBaselineTimer(durationSec);
+}
+
 // ── Timer (shared by control_group and baseline) ──────────────────────────
 function startBaselineTimer(durationSec) {
   baselineRemaining = durationSec;
@@ -1515,6 +1592,8 @@ async function showResults() {
 function showTimerResults() {
   if (testMode === 'baseline') {
     showBaselineChartResults();
+  } else if (testMode === 'deep_breathing') {
+    showDeepBreathingResults();
   } else {
     showControlGroupResults();
   }
@@ -1532,6 +1611,77 @@ function showBaselineChartResults() {
 
   document.getElementById('results-title').textContent = 'Baseline 测试结果';
   document.getElementById('best-freq').textContent = '无视觉引导';
+  document.getElementById('best-freq-label').textContent = '模式';
+  document.getElementById('best-cycle').textContent = `${testDuration} 分钟`;
+  document.getElementById('best-cycle-label').textContent = '时长';
+
+  const validBpm = d.bpm.filter(v => v > 0);
+  const avgBpm = validBpm.length ? (validBpm.reduce((a, b) => a + b, 0) / validBpm.length) : 0;
+  const avgRr = avgFn(d.rr.filter(v => v > 0));
+  const avgLf = avgFn(d.lf);
+  const avgCoherence = avgFn(d.coherence);
+
+  document.getElementById('results-stats').innerHTML = `
+    <div class="chart-summary">
+      <div class="chart-stat">
+        <div class="label">平均心率</div>
+        <div class="value" style="color:var(--red)">${avgBpm.toFixed(1)}</div>
+        <div style="font-size:0.7rem;color:var(--muted)">BPM</div>
+      </div>
+      <div class="chart-stat">
+        <div class="label">平均 RR 间期</div>
+        <div class="value" style="color:var(--accent)">${avgRr.toFixed(0)}</div>
+        <div style="font-size:0.7rem;color:var(--muted)">ms</div>
+      </div>
+      <div class="chart-stat">
+        <div class="label">平均 LF Power</div>
+        <div class="value" style="color:var(--green)">${avgLf.toFixed(2)}</div>
+        <div style="font-size:0.7rem;color:var(--muted)">ms²</div>
+      </div>
+      <div class="chart-stat">
+        <div class="label">平均 Coherence</div>
+        <div class="value" style="color:#58a6ff">${avgCoherence.toFixed(3)}</div>
+        <div style="font-size:0.7rem;color:var(--muted)">0–1</div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('results-table-title').textContent = '生理数据趋势';
+  document.getElementById('results-body').innerHTML = '';
+  document.getElementById('results-charts').innerHTML = `
+    <div class="chart-card" style="margin-bottom:1rem">
+      <h4>心率 (BPM)</h4>
+      ${buildSvgChart(d.timestamps, d.bpm.filter(v => v > 0), '#f85149', 'BPM')}
+    </div>
+    <div class="chart-card" style="margin-bottom:1rem">
+      <h4>RR 间期 (ms)</h4>
+      ${buildSvgChart(d.timestamps, d.rr.filter(v => v > 0), '#a371f7', 'ms')}
+    </div>
+    <div class="chart-card" style="margin-bottom:1rem">
+      <h4>LF Power (ms²)</h4>
+      ${buildSvgChart(d.timestamps, d.lf, '#3fb950', 'ms²')}
+    </div>
+    <div class="chart-card">
+      <h4>Coherence Score</h4>
+      ${buildSvgChart(d.timestamps, d.coherence, '#58a6ff', '')}
+    </div>
+  `;
+
+  showScreen('results');
+}
+
+function showDeepBreathingResults() {
+  const d = controlGroupData || { bpm: [], rr: [], lf: [], coherence: [], timestamps: [] };
+  const avgFn = arr => arr.length ? (arr.reduce((a, b) => a + b, 0) / arr.length) : 0;
+
+  document.querySelector('.result-card.best-result').style.display = '';
+  document.querySelectorAll('.result-card')[1].style.display = '';
+  document.getElementById('results-stats').innerHTML = '';
+  document.getElementById('results-charts').innerHTML = '';
+  document.getElementById('results-table-el').style.display = 'none';
+
+  document.getElementById('results-title').textContent = '深呼吸 测试结果';
+  document.getElementById('best-freq').textContent = '自由深呼吸';
   document.getElementById('best-freq-label').textContent = '模式';
   document.getElementById('best-cycle').textContent = `${testDuration} 分钟`;
   document.getElementById('best-cycle-label').textContent = '时长';
@@ -1888,8 +2038,10 @@ document.querySelectorAll('#mode-select .ratio-btn').forEach(btn => {
     document.getElementById('protocol-section').style.display =
       testMode === 'find_prbf' ? '' : 'none';
 
-    // Duration group: visible for control_group and baseline, hidden for find_prbf
-    const showTimer = (testMode === 'control_group' || testMode === 'baseline');
+    // Duration group: visible for control_group, baseline, and deep_breathing; hidden for find_prbf
+    const showTimer = (
+      testMode === 'control_group' || testMode === 'baseline' || testMode === 'deep_breathing'
+    );
     document.getElementById('duration-group').style.display = showTimer ? '' : 'none';
 
     // LF threshold: only for control_group
@@ -1902,6 +2054,8 @@ document.querySelectorAll('#mode-select .ratio-btn').forEach(btn => {
       testDuration = 7;
     } else if (testMode === 'baseline') {
       testDuration = 5;
+    } else if (testMode === 'deep_breathing') {
+      testDuration = 1.5; // 90 seconds
     } else {
       testDuration = 10; // find_prbf has fixed 10-min sweep
     }
@@ -1913,6 +2067,8 @@ document.querySelectorAll('#mode-select .ratio-btn').forEach(btn => {
       descEl.textContent = '固定频率 0.1 Hz（6 bpm）共振呼吸，通过实时HRV反馈引导您进入共振状态。';
     } else if (testMode === 'baseline') {
       descEl.textContent = '无视觉引导的基线测试，用于采集静息状态下的心率变异性数据。';
+    } else if (testMode === 'deep_breathing') {
+      descEl.textContent = '无视觉辅助的自由深呼吸测试，请根据自身节奏进行深呼吸，采集心率变异性数据。默认时长90秒，可在上方修改。';
     } else {
       descEl.textContent = '本测试将帮助您找到最佳的共振呼吸频率。系统会引导您在不同频率下呼吸，并通过心率变异性（HRV）分析确定产生最高LF功率的频率。';
     }
