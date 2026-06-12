@@ -281,6 +281,16 @@
   #arc-track { fill: none; stroke: var(--border); stroke-width: 3; }
   #arc-fill  { fill: none; stroke-width: 3; stroke-linecap: round; transition: stroke 0.6s ease; }
 
+  /* ── PRBF phase label ─────────────────────────────────────────────────── */
+  #prbf-phase-label.pre-rest  { background: rgba(63,185,80,0.15);  color: var(--green); }
+  #prbf-phase-label.training  { background: rgba(88,166,255,0.15); color: var(--accent); }
+  #prbf-phase-label.post-rest { background: rgba(210,153,34,0.15); color: var(--yellow); }
+
+  /* ── Resting phase: hide breathing UI ─────────────────────────────────── */
+  .resting-phase .circle-wrap,
+  .resting-phase .timeline,
+  .resting-phase .timeline-labels { display: none !important; }
+
   /* ── Phase timeline ──────────────────────────────────────────────────── */
   .timeline { display: flex; gap: 4px; width: min(400px, 90vw); }
   .timeline-seg {
@@ -691,9 +701,9 @@
     <div style="border:1px solid var(--border);border-radius:12px;padding:1.2rem">
       <h3 style="font-size:1rem;color:var(--green);margin-bottom:0.8rem">🧘 第二步：PRBF 训练</h3>
       <p class="exp-note" style="margin-bottom:1rem">
-        使用测试确定的最佳频率进行10分钟共振呼吸训练。
+        使用测试确定的最佳频率进行共振呼吸训练。包含训练前静息、正式训练、训练后静息三个阶段。
       </p>
-      
+
       <div class="exp-grid">
         <div class="form-group" style="margin-bottom:0.8rem">
           <label for="adp-best-freq-input">最佳频率 (bpm)</label>
@@ -704,9 +714,21 @@
             <a id="adp-cache-use" style="cursor:pointer;color:var(--accent);text-decoration:underline">使用</a>
           </div>
         </div>
+      </div>
+      <div class="exp-grid" style="grid-template-columns:repeat(3,1fr)">
+        <div class="form-group" style="margin-bottom:0.8rem">
+          <label for="adp-pre-rest-duration">前静息时长 (分钟)</label>
+          <input type="number" id="adp-pre-rest-duration" value="5" min="0" max="30" step="0.5"/>
+          <div class="hint">训练前静坐采集基线数据，设0跳过</div>
+        </div>
         <div class="form-group" style="margin-bottom:0.8rem">
           <label for="adp-train-duration">训练时长 (分钟)</label>
           <input type="number" id="adp-train-duration" value="10" min="5" max="30" step="1"/>
+        </div>
+        <div class="form-group" style="margin-bottom:0.8rem">
+          <label for="adp-post-rest-duration">后静息时长 (分钟)</label>
+          <input type="number" id="adp-post-rest-duration" value="10" min="0" max="30" step="0.5"/>
+          <div class="hint">训练后静坐恢复数据采集，设0跳过</div>
         </div>
       </div>
 
@@ -788,10 +810,11 @@
     <div style="font-size:0.82rem;color:var(--muted)">共振呼吸训练</div>
   </div>
 
-  <!-- Buteyko-only: round counter + phase badge -->
+  <!-- Phase indicator (Buteyko + PRBF training phases) -->
   <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;justify-content:center">
     <div id="round-counter"></div>
     <div id="buteyko-phase-label"></div>
+    <div id="prbf-phase-label" style="display:none;font-size:0.9rem;font-weight:600;padding:0.3em 0.8em;border-radius:999px;letter-spacing:0.03em"></div>
   </div>
 
   <div class="stats">
@@ -1067,10 +1090,13 @@ const adpTestSlots   = document.getElementById('adp-test-slots');
 const adpTestBtn     = document.getElementById('adaptive-test-btn');
 const adpBestFreqInput = document.getElementById('adp-best-freq-input');
 const adpTrainDuration = document.getElementById('adp-train-duration');
+const adpPreRestDuration  = document.getElementById('adp-pre-rest-duration');
+const adpPostRestDuration = document.getElementById('adp-post-rest-duration');
 const adpTrainBtn    = document.getElementById('adaptive-train-btn');
 const adpBestFreqDisplay = document.getElementById('adp-best-freq-display');
 const adpBestFreqValue = document.getElementById('adp-best-freq-value');
 const adpProgressEl  = document.getElementById('adaptive-progress-text');
+const prbfPhaseLabel = document.getElementById('prbf-phase-label');
 
 // PRBF ratio elements
 const adpTestRatioHint = document.getElementById('adp-test-ratio-hint');
@@ -1082,6 +1108,15 @@ let adpTestInhaleRatio = 4;
 let adpTestExhaleRatio = 6;
 let adpTrainInhaleRatio = 4;
 let adpTrainExhaleRatio = 6;
+
+// PRBF training phase state
+let prbfTrainPhase = null;       // 'pre_rest' | 'training' | 'post_rest' | null
+let prbfPhaseTimerInterval = null;
+let prbfPhaseRemaining = 0;      // seconds remaining in current phase
+let prbfPhaseStartTime = 0;      // Date.now() when current phase started
+let prbfPreRestSec = 0;          // pre-rest duration in seconds
+let prbfPostRestSec = 0;         // post-rest duration in seconds
+let prbfTrainSec = 0;            // training duration in seconds
 
 const bpmEl     = document.getElementById('bpm-value');
 const hrvEl     = document.getElementById('hrv-value');
@@ -1366,6 +1401,11 @@ function connectSSE() {
     if (!sessionActive) return;
 
     if (session_remaining !== undefined && session_remaining <= 0) {
+      // PRBF training: completion handled by phase timer, force-finish as safety net
+      if (adaptiveExperiment && adaptiveExperiment.mode === 'train' && prbfTrainPhase) {
+        finishPrbfSession();
+        return;
+      }
       onSessionComplete();
       return;
     }
@@ -1476,10 +1516,17 @@ async function saveSessionData() {
   saveBtn.disabled = true;
   saveStatus.textContent = '保存中…';
   try {
+    const saveBody = { username: USERNAME };
+    // Include pre/post rest durations if this was a PRBF training session
+    if (adaptiveExperiment && adaptiveExperiment.mode === 'train') {
+      saveBody.pre_rest_duration = adaptiveExperiment.preRestSec || 0;
+      saveBody.post_rest_duration = adaptiveExperiment.postRestSec || 0;
+      saveBody.train_duration = adaptiveExperiment.trainSec || 0;
+    }
     const resp = await fetch(api('/api/save_session'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: USERNAME })
+      body: JSON.stringify(saveBody)
     });
     const result = await resp.json();
     if (result.ok) {
@@ -1507,6 +1554,12 @@ async function restartSession() {
   await fetch(api('/api/reset'), { method: 'POST' });
   doneBanner.classList.remove('visible');
   sessionActive = false;
+  // Clean up PRBF phase state
+  if (prbfPhaseTimerInterval) { clearInterval(prbfPhaseTimerInterval); prbfPhaseTimerInterval = null; }
+  prbfTrainPhase = null;
+  prbfPhaseLabel.style.display = 'none';
+  document.getElementById('training-screen').classList.remove('resting-phase');
+  document.getElementById('timer-value').closest('.stat').style.display = '';
   showIdle();
   showScreen('start-screen');
   footerEl.textContent = 'HeartBeat 呼吸训练 · 连接设备后开始';
@@ -1526,6 +1579,7 @@ trainingBackBtn.addEventListener('click', async () => {
   // Stop session
   sessionActive = false;
   if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+  if (prbfPhaseTimerInterval) { clearInterval(prbfPhaseTimerInterval); prbfPhaseTimerInterval = null; }
   if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
   await fetch(api('/api/stop'), { method: 'POST' });
   await fetch(api('/api/reset'), { method: 'POST' });
@@ -1535,6 +1589,10 @@ trainingBackBtn.addEventListener('click', async () => {
   buteykoDonel.classList.remove('visible');
   roundCounterEl.style.display = 'none';
   bPhaseLabelEl.style.display = 'none';
+  prbfPhaseLabel.style.display = 'none';
+  prbfTrainPhase = null;
+  const trainingScreen = document.getElementById('training-screen');
+  trainingScreen.classList.remove('resting-phase');
   document.getElementById('timer-value').closest('.stat').style.display = '';
   showIdle();
   showScreen('start-screen');
@@ -1815,17 +1873,22 @@ function showAdaptiveTestResultOverlay() {
   adaptiveDoneEl.classList.add('visible');
 }
 
-// ── PRBF TRAIN MODE ────────────────────────────────────────────────────────
+// ── PRBF TRAIN MODE (with pre/post rest phases) ─────────────────────────────
 async function startAdaptiveTrain() {
   const freq = parseFloat(adpBestFreqInput.value);
-  const durationMin = parseInt(adpTrainDuration.value, 10);
-  const durationSec = durationMin * 60;
-  
+  const trainMin = parseInt(adpTrainDuration.value, 10);
+  const trainSec = trainMin * 60;
+  const preRestMin = parseFloat(adpPreRestDuration.value) || 0;
+  const postRestMin = parseFloat(adpPostRestDuration.value) || 0;
+  const preRestSec = Math.round(preRestMin * 60);
+  const postRestSec = Math.round(postRestMin * 60);
+  const totalSec = preRestSec + trainSec + postRestSec;
+
   if (!Number.isFinite(freq) || freq < 4 || freq > 12) {
     alert('请输入有效频率 (4-12 bpm)');
     return;
   }
-  
+
   // Check if user has completed test
   const hasTestResult = prbfBestFreq !== null && Math.abs(prbfBestFreq - freq) < 0.01;
   if (!hasTestResult) {
@@ -1833,12 +1896,17 @@ async function startAdaptiveTrain() {
       return;
     }
   }
-  
+
   const cycleSec = bpmToCycle(freq);
   const totalRatio = adpTrainInhaleRatio + adpTrainExhaleRatio;
   const inhaleSec = cycleSec * adpTrainInhaleRatio / totalRatio;
   const exhaleSec = cycleSec * adpTrainExhaleRatio / totalRatio;
-  
+
+  // Store phase durations for phase management
+  prbfPreRestSec = preRestSec;
+  prbfTrainSec = trainSec;
+  prbfPostRestSec = postRestSec;
+
   adaptiveExperiment = {
     mode: 'train',
     frequencies: [freq],
@@ -1846,14 +1914,18 @@ async function startAdaptiveTrain() {
     results: [],
     running: true,
     startTime: Date.now(),
+    preRestSec: preRestSec,
+    postRestSec: postRestSec,
+    trainSec: trainSec,
   };
 
+  // Configure server with TOTAL duration (all phases combined) for continuous data collection
   await fetch(api('/api/configure'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       breath_cycle: cycleSec,
-      session_duration: durationSec,
+      session_duration: totalSec,
       adaptive: false,
       username: USERNAME,
       inhale_ratio: adpTrainInhaleRatio,
@@ -1862,8 +1934,8 @@ async function startAdaptiveTrain() {
   });
   await fetch(api('/api/start'), { method: 'POST' });
 
-  sessionDuration = durationSec;
-  sessionRemaining = durationSec;
+  sessionDuration = totalSec;
+  sessionRemaining = totalSec;
   lastTimerSync = Date.now();
   sessionActive = true;
   bpmHistory.length = 0;
@@ -1873,19 +1945,123 @@ async function startAdaptiveTrain() {
 
   document.getElementById('timer-value').closest('.stat').style.display = '';
   roundCounterEl.style.display = 'none';
-  bPhaseLabelEl.style.display = '';
+  bPhaseLabelEl.style.display = 'none';
 
   cycle = { inhale: inhaleSec, exhale: exhaleSec, total: cycleSec };
   cycleEl.textContent = cycleSec.toFixed(2);
 
   onBreathCycleComplete = null;
   showScreen('training-screen');
-  timerEl.textContent = formatTime(durationSec);
-  footerEl.textContent = `PRBF 训练中 · ${freq.toFixed(2)} bpm · ${durationMin}分钟 · 比例 ${adpTrainInhaleRatio}:${adpTrainExhaleRatio}`;
-  updateAdaptiveProgress();
-  layoutTimeline();
-  startBreathing();
-  startTimerTick();
+  footerEl.textContent = `PRBF 训练 · ${freq.toFixed(2)} bpm · 前静息${preRestMin}min + 训练${trainMin}min + 后静息${postRestMin}min`;
+
+  // Start first phase (skip pre-rest if duration is 0)
+  const firstPhase = preRestSec > 0 ? 'pre_rest' : 'training';
+  startPrbfPhase(firstPhase);
+}
+
+function startPrbfPhase(phase) {
+  prbfTrainPhase = phase;
+  prbfPhaseStartTime = Date.now();
+
+  const durations = { pre_rest: prbfPreRestSec, training: prbfTrainSec, post_rest: prbfPostRestSec };
+  prbfPhaseRemaining = durations[phase];
+
+  updatePrbfPhaseUI(phase);
+  timerEl.textContent = formatTime(prbfPhaseRemaining);
+
+  // Clear any existing phase timer
+  if (prbfPhaseTimerInterval) clearInterval(prbfPhaseTimerInterval);
+
+  prbfPhaseTimerInterval = setInterval(() => {
+    if (!sessionActive) return;
+    const elapsed = (Date.now() - prbfPhaseStartTime) / 1000;
+    prbfPhaseRemaining = Math.max(0, durations[prbfTrainPhase] - elapsed);
+    timerEl.textContent = formatTime(prbfPhaseRemaining);
+
+    // Update footer text based on phase
+    if (prbfTrainPhase === 'pre_rest') {
+      footerEl.textContent = `静息测试 (训练前) · 剩余 ${formatTime(prbfPhaseRemaining)}`;
+    } else if (prbfTrainPhase === 'post_rest') {
+      footerEl.textContent = `静息测试 (训练后) · 剩余 ${formatTime(prbfPhaseRemaining)}`;
+    } else {
+      updateAdaptiveProgress();
+    }
+
+    if (prbfPhaseRemaining <= 0) {
+      clearInterval(prbfPhaseTimerInterval);
+      prbfPhaseTimerInterval = null;
+      advancePrbfPhase();
+    }
+  }, 250);
+}
+
+function advancePrbfPhase() {
+  if (prbfTrainPhase === 'pre_rest') {
+    startPrbfPhase('training');
+  } else if (prbfTrainPhase === 'training') {
+    if (prbfPostRestSec > 0) {
+      startPrbfPhase('post_rest');
+    } else {
+      finishPrbfSession();
+    }
+  } else if (prbfTrainPhase === 'post_rest') {
+    finishPrbfSession();
+  }
+}
+
+function updatePrbfPhaseUI(phase) {
+  const trainingScreen = document.getElementById('training-screen');
+
+  // Update phase badge
+  prbfPhaseLabel.style.display = '';
+  prbfPhaseLabel.className = phase;
+
+  if (phase === 'pre_rest') {
+    prbfPhaseLabel.textContent = '🟢 静息测试 (训练前)';
+    trainingScreen.classList.add('resting-phase');
+    showIdle();
+    adpProgressEl.textContent = '静息测试中 · 请保持静止 · 自然呼吸';
+  } else if (phase === 'training') {
+    prbfPhaseLabel.textContent = '🔵 共振呼吸训练';
+    trainingScreen.classList.remove('resting-phase');
+    layoutTimeline();
+    startBreathing();
+    updateAdaptiveProgress();
+  } else if (phase === 'post_rest') {
+    prbfPhaseLabel.textContent = '🟡 静息测试 (训练后)';
+    trainingScreen.classList.add('resting-phase');
+    showIdle();
+    adpProgressEl.textContent = '恢复静息中 · 请保持静止 · 自然呼吸';
+  }
+}
+
+async function finishPrbfSession() {
+  if (!sessionActive) return;
+  sessionActive = false;
+  if (prbfPhaseTimerInterval) { clearInterval(prbfPhaseTimerInterval); prbfPhaseTimerInterval = null; }
+  timerEl.textContent = '0:00';
+  prbfTrainPhase = null;
+
+  // Clean up PRBF phase UI
+  const trainingScreen = document.getElementById('training-screen');
+  trainingScreen.classList.remove('resting-phase');
+  prbfPhaseLabel.style.display = 'none';
+  bPhaseLabelEl.style.display = 'none';
+  adpProgressEl.textContent = '';
+  if (adaptiveExperiment) adaptiveExperiment.running = false;
+
+  // Stop session on server
+  await fetch(api('/api/stop'), { method: 'POST' });
+
+  // Show done overlay
+  document.getElementById('sum-bpm-avg').textContent = bpmEl.textContent;
+  document.getElementById('sum-rmssd').textContent   = hrvEl.textContent;
+  document.getElementById('sum-lf').textContent      = lfEl.textContent;
+  document.getElementById('sum-bpm-max').textContent = '––';
+  document.getElementById('sum-bpm-min').textContent = '––';
+  document.getElementById('sum-rr-count').textContent = '––';
+  saveStatus.textContent = '';
+  doneBanner.classList.add('visible');
 }
 
 // ── Event Listeners ───────────────────────────────────────────────────────

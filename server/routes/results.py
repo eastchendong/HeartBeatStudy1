@@ -122,8 +122,14 @@ def save_session():
     sess = get_current_session()
     body = request.get_json(silent=True) or {}
     username = body.get("username", "").strip()
-    
-    result = _save_session_to_file(sess, username=username, training_type="resonance")
+
+    # Collect optional phase duration metadata (for PRBF training with pre/post rest)
+    extra_data = {}
+    for key in ("pre_rest_duration", "post_rest_duration", "train_duration"):
+        if key in body:
+            extra_data[key] = body[key]
+
+    result = _save_session_to_file(sess, username=username, training_type="resonance", extra_data=extra_data if extra_data else None)
     return jsonify(result)
 
 
