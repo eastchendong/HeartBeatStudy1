@@ -44,20 +44,28 @@ def _get_cdi_config(sess: SessionState) -> dict:
 
 
 def _compute_stage_metrics(sess: SessionState) -> dict:
-    """Compute average LF Power and RMSSD for current stage."""
+    """Compute LF Power and RMSSD from current stage RR intervals only."""
     config = _get_cdi_config(sess)
     stage_data = config.get("stage_data", [])
-    
+
     if not stage_data:
         return {"lf_avg": None, "rmssd_avg": None, "bpm_avg": None, "count": 0}
-    
-    lf_values = [d["lf"] for d in stage_data if d.get("lf") is not None]
-    rmssd_values = [d["rmssd"] for d in stage_data if d.get("rmssd") is not None]
+
+    # Collect all RR intervals from this stage's cycles
+    stage_rr = []
+    for d in stage_data:
+        stage_rr.extend(d.get("rr_intervals", []))
+
+    # Compute LF power from stage-only RR data (no sliding window into
+    # previous stages or washout periods).
+    stage_lf = compute_lf_power(stage_rr) if stage_rr else None
+    stage_rmssd = compute_rmssd(stage_rr) if stage_rr else None
+
     bpm_values = [d["bpm"] for d in stage_data if d.get("bpm") is not None]
-    
+
     return {
-        "lf_avg": sum(lf_values) / len(lf_values) if lf_values else None,
-        "rmssd_avg": sum(rmssd_values) / len(rmssd_values) if rmssd_values else None,
+        "lf_avg": stage_lf,
+        "rmssd_avg": stage_rmssd,
         "bpm_avg": sum(bpm_values) / len(bpm_values) if bpm_values else None,
         "count": len(stage_data)
     }
@@ -215,12 +223,24 @@ def on_cycle_complete():
             sess.cycle_rr_list.append(cycle_rr)
         sess.current_cycle_rr.clear()
 
-        # Record current cycle data
+        # Record current cycle data.
+        # For find_prbf: compute LF power from stage-only RR data so that
+        # washout periods and previous stages do not contaminate the metric.
+        cycle_lf = sess.latest_lf_power  # default: sliding-window over all RRs
+        if mode == "find_prbf":
+            stage_rr = []
+            for d in cdi_config.get("stage_data", []):
+                stage_rr.extend(d.get("rr_intervals", []))
+            stage_rr.extend(cycle_rr)
+            stage_lf_val = compute_lf_power(stage_rr)
+            if stage_lf_val is not None:
+                cycle_lf = stage_lf_val
+
         cycle_data = {
             "cycle": current_cycle + 1,
             "bpm": sess.latest_bpm,
             "rmssd": sess.latest_rmssd,
-            "lf": sess.latest_lf_power,
+            "lf": cycle_lf,
             "rr_intervals": cycle_rr,
         }
         cdi_config["stage_data"].append(cycle_data)
@@ -238,7 +258,7 @@ def on_cycle_complete():
 
         # find_prbf: time-based stage advancement.
         # on-cycle-complete only records per-cycle data; stage advancement is
-        # triggered separately by on-stage-time-up when the 60 s timer expires.
+        # triggered separately by advance-stage when the 60 s timer expires.
         cdi_config["current_cycle"] = current_cycle + 1
 
         return jsonify({
