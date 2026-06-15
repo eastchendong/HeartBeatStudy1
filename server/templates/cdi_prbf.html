@@ -1980,14 +1980,18 @@ function connectSSE() {
     const { bpm, hrv_rmssd, lf_power, rr_interval, rr_pulses } = data;
 
     if (bpm > 0) {
-      lastLiveDataTime = Date.now();
+      // Always update display values
       bpmValue.textContent = bpm.toFixed(1);
       lastBpmFromSSE = bpm;
-      // Update baseline BPM display too
       const baselineBpmEl = document.getElementById('baseline-bpm-value');
       if (baselineBpmEl) baselineBpmEl.textContent = bpm.toFixed(1);
-      connPill.className = 'pill pill-connected';
-      connPill.textContent = 'Live ♥';
+
+      // Only show Live when locally connected, not from cross-tab contamination
+      if (heartBeltConnected || testState.isRunning) {
+        lastLiveDataTime = Date.now();
+        connPill.className = 'pill pill-connected';
+        connPill.textContent = 'Live ♥';
+      }
     }
     if (hrv_rmssd != null) {
       rmssdValue.textContent = hrv_rmssd.toFixed(1);

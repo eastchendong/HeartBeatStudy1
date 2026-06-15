@@ -1407,7 +1407,9 @@ function connectSSE() {
     }
 
     // Update connection status when heart rate data arrives (even in standby)
-    if (bpm > 0) {
+    // Only show Live when locally connected (heart belt or active session),
+    // not from cross-tab contamination via the shared server session.
+    if (bpm > 0 && (heartBeltConnected || sessionActive)) {
       lastLiveDataTime = Date.now();
       connPill.className   = 'pill pill-connected';
       connPill.textContent = 'Live ♥';
