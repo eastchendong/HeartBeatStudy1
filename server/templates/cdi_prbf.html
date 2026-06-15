@@ -856,6 +856,8 @@ let statsTracker = null;
 
 // Control group time-series data collection
 let controlGroupData = null;  // { bpm: [], lf: [], coherence: [], timestamps: [] }
+let lastLiveDataTime = 0;
+let liveDataStaleTimer = null;
 
 // ══════════════════════════════════════════════════════════════════════════
 // Elements
@@ -1951,7 +1953,20 @@ async function restartTest() {
 // ═══════════════════════════════════════════════════════════════════════════
 let sseRetryDelay = 2000;
 
+function checkDataFreshness() {
+  if (lastLiveDataTime > 0 && (Date.now() - lastLiveDataTime) > 5000) {
+    if (connPill.className.includes('pill-connected')) {
+      connPill.className = 'pill pill-waiting';
+      connPill.textContent = '已连接 – 等待数据…';
+    }
+  }
+}
+
 function connectSSE() {
+  if (liveDataStaleTimer) { clearInterval(liveDataStaleTimer); liveDataStaleTimer = null; }
+  lastLiveDataTime = 0;
+  liveDataStaleTimer = setInterval(checkDataFreshness, 3000);
+
   const es = new EventSource(api('/api/stream'));
   
   es.onopen = () => {
@@ -1965,6 +1980,7 @@ function connectSSE() {
     const { bpm, hrv_rmssd, lf_power, rr_interval, rr_pulses } = data;
 
     if (bpm > 0) {
+      lastLiveDataTime = Date.now();
       bpmValue.textContent = bpm.toFixed(1);
       lastBpmFromSSE = bpm;
       // Update baseline BPM display too
@@ -2002,6 +2018,8 @@ function connectSSE() {
   
   es.onerror = () => {
     es.close();
+    if (liveDataStaleTimer) { clearInterval(liveDataStaleTimer); liveDataStaleTimer = null; }
+    lastLiveDataTime = 0;
     connPill.className = 'pill pill-disconnected';
     connPill.textContent = '断开 – 重连中…';
     setTimeout(connectSSE, sseRetryDelay);

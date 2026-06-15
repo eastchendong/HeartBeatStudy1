@@ -1150,6 +1150,8 @@ let sessionActive    = false;
 let timerInterval    = null;
 let onBreathCycleComplete = null;  // hook for Buteyko
 let heartBeltConnected = false;
+let lastLiveDataTime = 0;
+let liveDataStaleTimer = null;
 let latestLiveMetrics = { bpm: null, rmssd: null, lf: null };
 let adaptiveExperiment = null;
 
@@ -1354,7 +1356,23 @@ function updateSparkline() {
 // ══════════════════════════════════════════════════════════════════════════
 let sseRetryDelay = 2000;
 
+function checkDataFreshness() {
+  // Revert to waiting state if no heart-rate data for > 5 seconds,
+  // but only when SSE is connected (not in error/disconnected state).
+  if (lastLiveDataTime > 0 && (Date.now() - lastLiveDataTime) > 5000) {
+    if (connPill.className.includes('pill-connected')) {
+      connPill.className   = 'pill pill-waiting';
+      connPill.textContent = '已连接 – 等待数据…';
+    }
+  }
+}
+
 function connectSSE() {
+  // Clear any previous stale timer
+  if (liveDataStaleTimer) { clearInterval(liveDataStaleTimer); liveDataStaleTimer = null; }
+  lastLiveDataTime = 0;
+  liveDataStaleTimer = setInterval(checkDataFreshness, 3000);
+
   const es = new EventSource(api('/api/stream'));
 
   es.onopen = () => {
@@ -1390,6 +1408,7 @@ function connectSSE() {
 
     // Update connection status when heart rate data arrives (even in standby)
     if (bpm > 0) {
+      lastLiveDataTime = Date.now();
       connPill.className   = 'pill pill-connected';
       connPill.textContent = 'Live ♥';
       bpmHistory.push(bpm);
@@ -1419,6 +1438,8 @@ function connectSSE() {
 
   es.onerror = () => {
     es.close();
+    if (liveDataStaleTimer) { clearInterval(liveDataStaleTimer); liveDataStaleTimer = null; }
+    lastLiveDataTime = 0;
     connPill.className   = 'pill pill-disconnected';
     connPill.textContent = '断开 – 重连中…';
     setTimeout(connectSSE, sseRetryDelay);

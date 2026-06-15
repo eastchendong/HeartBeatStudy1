@@ -174,6 +174,7 @@ def receive_pulse():
                 sess.latest_lf_power = computed_lf
 
             sess.breath_cycle = _compute_cycle(sess, sess.latest_rmssd)
+        sess.last_pulse_time = time.time()
         snap_bpm   = avg_bpm
         snap_rmssd = sess.latest_rmssd
         snap_cycle = sess.breath_cycle
@@ -262,7 +263,11 @@ def stream():
             sess.subscribers.append(q)
         try:
             with sess.lock:
-                avg_bpm = sum(sess.bpm_window) / len(sess.bpm_window) if sess.bpm_window else 0
+                last_pulse = getattr(sess, 'last_pulse_time', 0) or 0
+                if last_pulse and (time.time() - last_pulse) < 5:
+                    avg_bpm = sum(sess.bpm_window) / len(sess.bpm_window) if sess.bpm_window else 0
+                else:
+                    avg_bpm = 0
                 cycle   = sess.breath_cycle
                 rmssd   = sess.latest_rmssd
             yield f"data: {json.dumps(_make_payload(sess, avg_bpm, rmssd, cycle))}\n\n"
