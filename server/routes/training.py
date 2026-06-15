@@ -52,18 +52,19 @@ def _elapsed_seconds(sess: SessionState) -> float:
     return sess.elapsed_before_pause + (time.time() - sess.session_start)
 
 
-def _make_payload(sess: SessionState, bpm: float, rmssd: Optional[float], cycle: float) -> dict:
+def _make_payload(sess: SessionState, bpm: float, rmssd: Optional[float],
+                  cycle: float, rr_pulses: Optional[list] = None) -> dict:
     session_dur = _get_session_duration(sess)
     remaining = max(0.0, session_dur - _elapsed_seconds(sess)) if sess.session_active else session_dur
-    
+
     # Calculate inhale/exhale based on configured ratio
     inhale_ratio = int(sess.session_config.get("inhale_ratio", 5))
     exhale_ratio = int(sess.session_config.get("exhale_ratio", 5))
     total_ratio = inhale_ratio + exhale_ratio
     inhale = round(cycle * inhale_ratio / total_ratio, 1)
     exhale = round(cycle * exhale_ratio / total_ratio, 1)
-    
-    return {
+
+    payload = {
         "bpm":               round(bpm, 1),
         "hrv_rmssd":         round(rmssd, 1) if rmssd is not None else None,
         "lf_power":          round(sess.latest_lf_power, 4) if sess.latest_lf_power is not None else None,
@@ -79,6 +80,11 @@ def _make_payload(sess: SessionState, bpm: float, rmssd: Optional[float], cycle:
         "active":            sess.session_active,
         "session_id":        sess.session_id,
     }
+    # Per-beat RR pulses with cumulative timestamps for frontend coherence
+    # (matching Unity rrPulse TCP messages)
+    if rr_pulses:
+        payload["rr_pulses"] = rr_pulses
+    return payload
 
 
 def _broadcast(sess: SessionState, payload: dict):
@@ -115,12 +121,30 @@ def receive_pulse():
         sess.latest_bpm = avg_bpm
         sess.bpm_all.append(bpm)
 
+        # Spread RR intervals across proper cumulative timestamps.
+        # BLE notifications arrive every ~5 s carrying a batch of 5-9 RRs.
+        # Without spreading, all RRs in a batch share the same wall-clock
+        # timestamp — which destroys spectral resolution (Nyquist drops to
+        # ~0.09 Hz, below the 0.1 Hz breathing guidance frequency).
+        #
+        # This mirrors the Python relay server's RRPulseDealer: each RR
+        # advances a cumulative clock by rr_ms / 1000, anchored to wall-
+        # clock on the first RR of the first batch after session start.
         now = time.time()
+        if not hasattr(sess, '_rr_wall_ref') or sess._rr_wall_ref is None:
+            sess._rr_wall_ref = now
+            sess._rr_cumulative_ts = 0.0
+
+        # Collect per-beat RR pulses for frontend coherence (matching Unity rrPulse)
+        batch_rr_pulses = []
         for rr in rr_intervals:
             rr_val = float(rr)
             if 200 < rr_val < 2000:
+                sess._rr_cumulative_ts += rr_val / 1000.0
+                rr_ts = sess._rr_wall_ref + sess._rr_cumulative_ts
+                batch_rr_pulses.append({"rr": round(rr_val, 1), "ts": round(rr_ts, 3)})
                 sess.rr_intervals.append(rr_val)
-                sess.rr_timestamps.append(now)
+                sess.rr_timestamps.append(rr_ts)
                 sess.latest_rr_interval = rr_val
                 # Also track for per-cycle RR (CDI PRBF)
                 if hasattr(sess, 'current_cycle_rr'):
@@ -130,7 +154,11 @@ def receive_pulse():
         is_active  = sess.session_active
 
         if is_active:
-            recent_rr = sess.rr_intervals[-120:] if len(sess.rr_intervals) > 120 else list(sess.rr_intervals)
+            # Pass ALL session RRs — compute_lf_power() applies its own 120 s
+            # time-based sliding window internally, matching Unity's
+            # LFPowerAnalyzer which also keeps all RRs and trims by
+            # cumulativeTime - windowDuration.
+            recent_rr = list(sess.rr_intervals)
             computed_rmssd = compute_rmssd(recent_rr)
             computed_lf    = compute_lf_power(recent_rr)
 
@@ -150,7 +178,7 @@ def receive_pulse():
         snap_rmssd = sess.latest_rmssd
         snap_cycle = sess.breath_cycle
 
-    payload = _make_payload(sess, snap_bpm, snap_rmssd, snap_cycle)
+    payload = _make_payload(sess, snap_bpm, snap_rmssd, snap_cycle, batch_rr_pulses)
     if not is_paused and is_active:
         _broadcast(sess, payload)
     return jsonify(payload), 200
@@ -184,6 +212,8 @@ def start_session():
         sess.latest_lf_power = None
         sess.latest_bpm      = 0.0
         sess.breath_cycle    = _get_base_cycle(sess)
+        sess._rr_wall_ref    = None
+        sess._rr_cumulative_ts = 0.0
         avg_bpm = 0
         cycle   = sess.breath_cycle
         rmssd   = None

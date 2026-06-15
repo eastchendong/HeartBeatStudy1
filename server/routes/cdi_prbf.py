@@ -128,6 +128,8 @@ def start_test():
         sess.latest_rmssd = None
         sess.latest_lf_power = None
         sess.latest_bpm = 0.0
+        sess._rr_wall_ref = None
+        sess._rr_cumulative_ts = 0.0
         sess.current_cycle_rr.clear()
         sess.cycle_rr_list.clear()
         sess.blossom_count = 0

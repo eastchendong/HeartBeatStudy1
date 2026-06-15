@@ -967,15 +967,10 @@ function applyCoherenceColor() {
     // Debug: force specific color level
     c = DEBUG_COLORS[debugForceColorLevel];
   } else {
-    // Normal: coherence-based color (0.1 Hz = 6 bpm)
-    const freqHz = 6.0 / 60;
-    const result = coherenceTracker.update(
-      lastBpmFromSSE || 0,
-      performance.now() / 1000,
-      testState._animPhase || 0,
-      freqHz
-    );
-    c = result.color;
+    // Coherence is now event-driven via SSE rr_pulses → updateFromRR().
+    // Just read the current colour level — no need to re-feed data.
+    const level = coherenceTracker ? coherenceTracker.currentLevel : 0;
+    c = DEBUG_COLORS[level];  // DEBUG_COLORS matches coherence.js COLOR_LEVELS values
   }
   breathCircle.style.setProperty('--circle-color', c);
   breathCircle.style.background = `radial-gradient(circle at 35% 35%, ${c}, #000000)`;
@@ -1201,15 +1196,9 @@ async function startControlGroupTest() {
   const sessionStartTs = performance.now() / 1000;
   controlGroupData = { bpm: [], rr: [], lf: [], coherence: [], timestamps: [] };
 
-  // Coherence update at 2 Hz (0.5 s) — matches RSAAnalyzer.UpdateCoherence() cadence
-  coherenceTimer = setInterval(() => {
-    if (coherenceTracker && lastBpmFromSSE > 0) {
-      coherenceTracker.update(lastBpmFromSSE, performance.now() / 1000, 0, 0.1);
-      const coh = coherenceTracker.smoothedCoherence.toFixed(3);
-      document.getElementById('coherence-score').textContent = coh;
-      document.getElementById('debug-coherence-val').textContent = coh;
-    }
-  }, 500);
+  // Coherence is now event-driven: each RR pulse from SSE rr_pulses calls
+  // coherenceTracker.updateFromRR(rrMs, ts, freqHz) in the SSE onmessage handler.
+  // This matches Unity's per-rrPulse → AddHeartRateData() flow.
 
   // Data recording + blossom checks at 1 Hz
   blossomInterval = setInterval(() => {
@@ -1334,12 +1323,8 @@ async function startBaselineTest() {
   const sessionStartTs = performance.now() / 1000;
   controlGroupData = { bpm: [], rr: [], lf: [], coherence: [], timestamps: [] };
 
-  // Coherence update at 2 Hz (0.5 s) — matches RSAAnalyzer.UpdateCoherence() cadence
-  coherenceTimer = setInterval(() => {
-    if (coherenceTracker && lastBpmFromSSE > 0) {
-      coherenceTracker.update(lastBpmFromSSE, performance.now() / 1000, 0, 0.1);
-    }
-  }, 500);
+  // Coherence is now event-driven via SSE rr_pulses → updateFromRR().
+  // The SSE onmessage handler feeds each RR pulse individually.
 
   // Data recording at 1 Hz
   blossomInterval = setInterval(() => {
@@ -1412,12 +1397,8 @@ async function startDeepBreathingTest() {
   const sessionStartTs = performance.now() / 1000;
   controlGroupData = { bpm: [], rr: [], lf: [], coherence: [], timestamps: [] };
 
-  // Coherence update at 2 Hz (0.5 s) — matches RSAAnalyzer.UpdateCoherence() cadence
-  coherenceTimer = setInterval(() => {
-    if (coherenceTracker && lastBpmFromSSE > 0) {
-      coherenceTracker.update(lastBpmFromSSE, performance.now() / 1000, 0, 0.1);
-    }
-  }, 500);
+  // Coherence is now event-driven via SSE rr_pulses → updateFromRR().
+  // The SSE onmessage handler feeds each RR pulse individually.
 
   // Data recording at 1 Hz
   blossomInterval = setInterval(() => {
@@ -1989,7 +1970,7 @@ function connectSSE() {
   
   es.onmessage = (ev) => {
     const data = JSON.parse(ev.data);
-    const { bpm, hrv_rmssd, lf_power, rr_interval } = data;
+    const { bpm, hrv_rmssd, lf_power, rr_interval, rr_pulses } = data;
 
     if (bpm > 0) {
       bpmValue.textContent = bpm.toFixed(1);
@@ -2009,6 +1990,21 @@ function connectSSE() {
     }
     if (rr_interval != null) {
       lastRrFromSSE = rr_interval;
+    }
+
+    // ── Event-driven coherence: feed each RR pulse individually ────────
+    // Matching Unity: each rrPulse TCP message → AddHeartRateData(60000f/rrMs, ts)
+    if (rr_pulses && Array.isArray(rr_pulses) && coherenceTracker) {
+      const freqHz = testState.breathCycle.total > 0
+        ? 1.0 / testState.breathCycle.total
+        : 0.1;  // default 0.1 Hz
+      for (const pulse of rr_pulses) {
+        if (pulse.rr > 0) {
+          const result = coherenceTracker.updateFromRR(pulse.rr, pulse.ts, freqHz);
+          document.getElementById('coherence-score').textContent = result.coherence.toFixed(3);
+          document.getElementById('debug-coherence-val').textContent = result.coherence.toFixed(3);
+        }
+      }
     }
   };
   

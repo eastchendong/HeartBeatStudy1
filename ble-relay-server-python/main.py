@@ -67,10 +67,99 @@ class Config:
     TCP_HOST = os.getenv('BLE_TCP_HOST', '127.0.0.1')
     # 扫描超时时间（秒）
     SCAN_TIMEOUT = _get_env_float('BLE_SCAN_TIMEOUT', 30.0)
+    # RR pulse 释放缓冲延迟（秒）— 实现"发牌"式逐拍延时传输
+    RR_BUFFER_DELAY = _get_env_float('BLE_RR_BUFFER_DELAY', 0.0)
+
+
+# ===================== RRPulseDealer =====================
+
+class RRPulseDealer:
+    """
+    Buffers RR intervals received in bursts and releases them one-by-one
+    at physiological cadence with a configurable delay.
+
+    Like a card dealer who picks up 5 cards at once, then deals them
+    one at a time at the correct timing.
+    """
+
+    def __init__(self, buffer_delay: float = 0.0, device_name: str = ''):
+        self.buffer_delay = buffer_delay
+        self.device_name = device_name
+        self._queue: asyncio.Queue = asyncio.Queue()
+        self._released: List[dict] = []
+        self._cumulative_ts: float = 0.0
+        self._wall_ref: Optional[float] = None
+        self._ts_ref: float = 0.0
+        self._task: Optional[asyncio.Task] = None
+
+    def feed(self, rri_array: List[RRI]):
+        """Feed a batch of RR intervals into the dealer."""
+        for rri in rri_array:
+            self._cumulative_ts += rri.rri / 1000.0
+            self._queue.put_nowait({
+                'rr': rri.rri,
+                'ts': round(self._cumulative_ts, 3),
+                'deviceName': self.device_name,
+            })
+
+        if self._task is None or self._task.done():
+            self._task = asyncio.create_task(self._release_loop())
+
+    async def _release_loop(self):
+        """Release pulses one at a time at physiological cadence."""
+        first_pulse = True
+
+        while True:
+            try:
+                pulse = await asyncio.wait_for(self._queue.get(), timeout=2.0)
+            except asyncio.TimeoutError:
+                return
+
+            if first_pulse:
+                self._wall_ref = time.monotonic() + self.buffer_delay
+                self._ts_ref = pulse['ts']
+                first_pulse = False
+
+            release_time = self._wall_ref + (pulse['ts'] - self._ts_ref)
+            now = time.monotonic()
+            if release_time > now:
+                await asyncio.sleep(release_time - now)
+
+            self._released.append(pulse)
+
+            if connected_clients:
+                asyncio.create_task(broadcast_to_unity({
+                    'type': 'rrPulse',
+                    'rr': pulse['rr'],
+                    'ts': pulse['ts'],
+                    'deviceName': pulse.get('deviceName', self.device_name),
+                }))
+
+    def drain(self) -> List[dict]:
+        """Get and clear all released pulses since last drain."""
+        pulses = self._released[:]
+        self._released.clear()
+        return pulses
+
+    def reset(self):
+        """Reset the dealer state."""
+        self._cumulative_ts = 0.0
+        self._wall_ref = None
+        self._ts_ref = 0.0
+        self._released.clear()
+        while not self._queue.empty():
+            try:
+                self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+        if self._task and not self._task.done():
+            self._task.cancel()
+        self._task = None
 
 
 # ===================== 全局变量 =====================
 bluetooth_manager = BluetoothManager()
+pulse_dealer = RRPulseDealer(buffer_delay=Config.RR_BUFFER_DELAY)
 tcp_server: Optional[asyncio.Server] = None
 connected_clients: List[asyncio.StreamWriter] = []
 
@@ -329,6 +418,13 @@ def setup_bluetooth_callbacks():
         # 打印到控制台
         print_live_data(data)
         
+        # Feed RR intervals through the pulse dealer so each beat gets an
+        # independent cumulative timestamp (instead of all sharing the batch
+        # arrival time).  This preserves spectral resolution for downstream
+        # coherence / LF‑power analysis.
+        if data.rriArray:
+            pulse_dealer.feed(data.rriArray)
+
         # 发送给Unity
         formatted = format_ferry_data_for_unity(data)
         asyncio.create_task(broadcast_to_unity(formatted))

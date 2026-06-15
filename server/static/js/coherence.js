@@ -7,20 +7,28 @@
  * because segment averaging reduces spectral variance and the Hanning window
  * suppresses sidelobe leakage.
  *
- * Algorithm (per ~1 Hz update):
- *   1. Buffer HR samples in a sliding window (default 60 s).
- *   2. Resample to an even time grid (default 4 Hz) via linear interpolation.
- *   3. Welch PSD:
+ * Input: raw RR intervals (ms) with cumulative timestamps.
+ * Each RR is converted to instantaneous HR internally (hr = 60000 / rrMs),
+ * matching the Unity RSAAnalyzer.cs pipeline.
+ *
+ * Algorithm (event-driven, per RR pulse from SSE rr_pulses):
+ *   1. Convert RR → instantaneous HR (60000 / rrMs).
+ *   2. Buffer {hr, timestamp} in a sliding window (default 60 s).
+ *   3. Resample to an even time grid (default 4 Hz) via linear interpolation.
+ *   4. Fill gaps with nearest-neighbour interpolation (matching Unity
+ *      FillGapsNearestNeighbor).
+ *   5. De-mean the signal.
+ *   6. Welch PSD:
  *      a. Split the resampled signal into overlapping segments (75 % overlap).
  *      b. Apply a Hanning window to each segment.
- *      c. Zero-pad each segment to the next power of two.
+ *      c. Zero-pad each segment to 256 samples.
  *      d. Compute the FFT periodogram |X[k]|² for each segment.
  *      e. Average periodograms across segments → smooth PSD estimate.
- *   4. Compute guidance-band power (f_g ± 0.02 Hz) and total power (all bins
+ *   7. Compute guidance-band power (f_g ± 0.02 Hz) and total power (all bins
  *      except DC) from the averaged PSD.
- *   5. Raw entrainment score = P_band / P_total, clamped to [0, 1].
- *   6. EMA-smooth the score.
- *   7. At the end of each breathing cycle, evaluate the smoothed score against
+ *   8. Raw entrainment score = P_band / P_total, clamped to [0, 1].
+ *   9. EMA-smooth the score.
+ *  10. At the end of each breathing cycle, evaluate the smoothed score against
  *      a single threshold ± hysteresis band, counting consecutive good/bad
  *      cycles to drive colour-level transitions.
  *
@@ -39,7 +47,10 @@
  *
  * Usage:
  *   const tracker = new EntrainmentTracker();
- *   const { coherence, level, color } = tracker.update(hr, timestamp, _phase, freqHz);
+ *   // For each RR pulse from SSE:
+ *   const { coherence, level, color } = tracker.updateFromRR(rrMs, ts, freqHz);
+ *   // At end of each breathing cycle:
+ *   tracker.endCycle();
  */
 
 (function () {
@@ -109,15 +120,50 @@
     // ── Public API ──────────────────────────────────────────────────────────
 
     /**
-     * Update the entrainment score with a new HR sample.
+     * Update the entrainment score with a raw RR interval.
+     *
+     * Internally converts RR to instantaneous HR (hr = 60000 / rrMs),
+     * matching the Unity RSAAnalyzer pipeline:
+     *   DeviceChannel → ProcessRRPulse → rsaAnalyzer.AddHeartRateData(60000f/rrMs, ts)
+     *
+     * @param {number} rrMs           - RR interval in milliseconds
+     * @param {number} timestamp      - Cumulative time in seconds (from server rr_pulses[].ts)
+     * @param {number} resonantFreqHz - Guidance breathing frequency in Hz (bpm / 60)
+     * @returns {{ coherence: number, level: number, color: string }}
+     */
+    updateFromRR(rrMs, timestamp, resonantFreqHz) {
+      if (rrMs <= 0) {
+        return {
+          coherence: this.entrainmentScore,
+          level: this.currentLevel,
+          color: COLOR_LEVELS[this.currentLevel].color,
+        };
+      }
+
+      // Convert RR → instantaneous HR (matching Unity 60000f / rrMs)
+      const hr = 60000.0 / rrMs;
+
+      return this._update(hr, timestamp, resonantFreqHz);
+    }
+
+    /**
+     * Legacy update method: accepts pre-computed heart rate.
+     * Prefer updateFromRR() when raw RR intervals are available.
      *
      * @param {number} hr              - Heart rate in BPM
-     * @param {number} timestamp       - Time in seconds (performance.now() / 1000)
+     * @param {number} timestamp       - Time in seconds
      * @param {number} _breathingPhase - Unused (kept for API compatibility)
      * @param {number} resonantFreqHz  - Guidance breathing frequency in Hz (bpm/60)
      * @returns {{ coherence: number, level: number, color: string }}
      */
     update(hr, timestamp, _breathingPhase, resonantFreqHz) {
+      return this._update(hr, timestamp, resonantFreqHz);
+    }
+
+    /**
+     * Internal update implementation.
+     */
+    _update(hr, timestamp, resonantFreqHz) {
       if (this.sessionStart === null) {
         this.sessionStart = timestamp;
       }
@@ -142,7 +188,7 @@
         };
       }
 
-      // Resample → Welch PSD → band-power ratio → smooth → colour
+      // Resample → gap-fill → de-mean → Welch PSD → band-power ratio → smooth
       const resampled = this._resampleLinear();
       if (resampled.length < this.segmentLen) {
         return {
@@ -172,7 +218,12 @@
 
     /**
      * Linearly interpolate the unevenly-sampled HR history onto an even
-     * time grid at this.sampleRate Hz. Returns a zero-mean signal.
+     * time grid at this.sampleRate Hz.
+     *
+     * Pipeline (matching Unity RSAAnalyzer.CalculateSpectralEntrainment):
+     *   1. Linear interpolation → uniform grid
+     *   2. Fill gaps with nearest-neighbour (FillGapsNearestNeighbor)
+     *   3. De-mean
      *
      * @returns {number[]} Evenly-spaced, zero-mean HR values.
      */
@@ -208,6 +259,9 @@
         }
       }
 
+      // Fill any gaps with nearest-neighbour (matching Unity FillGapsNearestNeighbor)
+      this._fillGapsNearest(grid);
+
       // Remove mean (DC)
       let sum = 0;
       for (let i = 0; i < n; i++) sum += grid[i];
@@ -215,6 +269,44 @@
       for (let i = 0; i < n; i++) grid[i] -= mean;
 
       return grid;
+    }
+
+    /**
+     * Fill zero/undefined gaps using nearest-neighbour interpolation.
+     * Forward pass: propagate last valid value.
+     * Backward pass: fill leading gaps with first valid value.
+     *
+     * Matches Unity RSAAnalyzer.FillGapsNearestNeighbor().
+     *
+     * @param {number[]} signal - Modified in-place.
+     */
+    _fillGapsNearest(signal) {
+      const n = signal.length;
+
+      // Forward pass: propagate last valid value
+      let lastValid = 0;
+      let hasLast = false;
+      for (let i = 0; i < n; i++) {
+        if (signal[i] !== 0 && !isNaN(signal[i])) {
+          lastValid = signal[i];
+          hasLast = true;
+        } else if (hasLast) {
+          signal[i] = lastValid;
+        }
+      }
+
+      if (!hasLast) return;
+
+      // Backward pass: fill leading zeros
+      let firstNonZero = 0;
+      while (firstNonZero < n && signal[firstNonZero] === 0) {
+        firstNonZero++;
+      }
+      if (firstNonZero > 0 && firstNonZero < n) {
+        for (let i = 0; i < firstNonZero; i++) {
+          signal[i] = signal[firstNonZero];
+        }
+      }
     }
 
     // ── Welch PSD ───────────────────────────────────────────────────────────
@@ -228,6 +320,8 @@
      *   3. Zero-pad → FFT → |X[k]|² (periodogram).
      *   4. Average periodograms across segments → smooth PSD.
      *   5. Guidance-band power / total power → entrainment score.
+     *
+     * Matches Unity RSAAnalyzer.CalculateSpectralEntrainment().
      *
      * @param {number[]} signal - Zero-mean, evenly-sampled HR values.
      * @param {number}   fGuidanceHz - Guidance breathing frequency in Hz.
@@ -322,6 +416,8 @@
 
     /**
      * Compute the in-place radix-2 decimation-in-time FFT.
+     *
+     * Matches Unity RSAAnalyzer.FFT().
      *
      * @param {number[]} re - Real part (modified in-place).
      * @param {number[]} im - Imaginary part (modified in-place).
