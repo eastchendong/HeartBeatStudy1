@@ -553,20 +553,20 @@
     </p>
 
     <div class="protocol" id="protocol-section" style="display:none">
-      <h3>测试流程</h3>
+      <h3>测试流程 — 呼吸周期长度 (秒/次)</h3>
       <div class="freq-grid">
-        <div class="freq-item">8.0</div>
-        <div class="freq-item">8.25</div>
-        <div class="freq-item">8.5</div>
-        <div class="freq-item">8.75</div>
-        <div class="freq-item">9.0</div>
-        <div class="freq-item">9.25</div>
-        <div class="freq-item">9.5</div>
-        <div class="freq-item">9.75</div>
-        <div class="freq-item">10.0</div>
-        <div class="freq-item">10.25</div>
+        <div class="freq-item">5.5s</div>
+        <div class="freq-item">6.0s</div>
+        <div class="freq-item">6.5s</div>
+        <div class="freq-item">7.0s</div>
+        <div class="freq-item">7.5s</div>
+        <div class="freq-item">8.0s</div>
+        <div class="freq-item">8.5s</div>
+        <div class="freq-item">9.0s</div>
+        <div class="freq-item">9.5s</div>
+        <div class="freq-item">10.0s</div>
       </div>
-      <p class="protocol-note">共10个频率档位，每档3个呼吸周期</p>
+      <p class="protocol-note">共10个档位 (5.5–10.0 s)，每档60秒，间隔30秒洗脱期 · 总计约15分钟</p>
     </div>
 
     <div class="form-group">
@@ -749,8 +749,8 @@
         <thead>
           <tr>
             <th>档位</th>
+            <th>周期长度 (s)</th>
             <th>频率 (bpm)</th>
-            <th>周期 (s)</th>
             <th>LF Power</th>
             <th>RMSSD</th>
             <th>BPM</th>
@@ -784,8 +784,14 @@
 // ══════════════════════════════════════════════════════════════════════════
 // Constants & Config
 // ══════════════════════════════════════════════════════════════════════════
-const CDI_FREQUENCIES = [8.0, 8.25, 8.5, 8.75, 9.0, 9.25, 9.5, 9.75, 10.0, 10.25];
-const CYCLES_PER_FREQ = 3;
+// Cycle lengths in seconds per full breath (inhale + exhale).
+// Range: 5.5 s to 10.0 s in 0.5 s increments (10 stages).
+const CDI_CYCLE_LENGTHS = [5.5, 6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 9.0, 9.5, 10.0];
+// Derived: corresponding breathing frequencies in breaths per minute.
+const CDI_FREQUENCIES = CDI_CYCLE_LENGTHS.map(cl => +(60.0 / cl).toFixed(2));
+const STAGE_DURATION = 60;      // seconds of paced breathing per stage
+const WASHOUT_DURATION = 30;    // seconds of rest between stages
+const CYCLES_PER_FREQ = 3;      // kept for reference; stage advance is now time-based
 const CIRC = 2 * Math.PI * 47;
 
 const COLORS = {
@@ -843,6 +849,13 @@ let baselineTimerInterval = null;
 let baselineRemaining = 0;
 let baselineStartTime = null;
 
+// Find PRBF stage timer (60s active + 30s washout)
+let stageTimerInterval = null;
+let washoutTimerInterval = null;
+let stageRemaining = 0;
+let isWashout = false;
+let stageTimerStartTime = null;
+
 // LF Blossom (control_group only)
 let blossomEffect = null;
 let blossomInterval = null;
@@ -896,6 +909,10 @@ function showScreen(name) {
   screens[name].classList.add('active');
 }
 
+function cycleToFreq(cl) {
+  return +(60.0 / cl).toFixed(2);
+}
+
 function freqToCycle(freq) {
   return Math.round((60 / freq) * 100) / 100;
 }
@@ -906,11 +923,11 @@ function freqToCycle(freq) {
 // Generate stage dots
 function initStageGrid() {
   stagesGrid.innerHTML = '';
-  CDI_FREQUENCIES.forEach((freq, i) => {
+  CDI_CYCLE_LENGTHS.forEach((cl, i) => {
     const dot = document.createElement('div');
     dot.className = 'stage-dot';
     dot.dataset.stage = i;
-    dot.title = `${freq} bpm`;
+    dot.title = `${cl.toFixed(1)} s (${cycleToFreq(cl).toFixed(2)} bpm)`;
     stagesGrid.appendChild(dot);
   });
 }
@@ -926,7 +943,7 @@ function updateStageIndicators() {
       dot.classList.add('current');
     }
   });
-  stageProgress.textContent = `第 ${testState.currentStage + 1}/${CDI_FREQUENCIES.length} 档`;
+  stageProgress.textContent = `第 ${testState.currentStage + 1}/${CDI_CYCLE_LENGTHS.length} 档`;
 }
 
 // Update cycle indicators
@@ -1036,17 +1053,19 @@ function animate(ts) {
   }
 }
 
-function startBreathing(freqOverride) {
+function startBreathing(cycleLengthOverride) {
   if (animFrame) cancelAnimationFrame(animFrame);
-  const freq = freqOverride !== undefined ? freqOverride : CDI_FREQUENCIES[testState.currentStage];
-  const cycle = freqToCycle(freq);
+  const cl = cycleLengthOverride !== undefined
+    ? cycleLengthOverride
+    : CDI_CYCLE_LENGTHS[testState.currentStage];
+  const freq = cycleToFreq(cl);
   const totalRatio = inhaleRatio + exhaleRatio;
-  const inhale = cycle * inhaleRatio / totalRatio;
-  const exhale = cycle * exhaleRatio / totalRatio;
+  const inhale = cl * inhaleRatio / totalRatio;
+  const exhale = cl * exhaleRatio / totalRatio;
 
-  testState.breathCycle = { inhale, exhale, total: cycle };
+  testState.breathCycle = { inhale, exhale, total: cl };
   freqValue.textContent = freq.toFixed(2);
-  cycleValue.textContent = cycle.toFixed(2);
+  cycleValue.textContent = cl.toFixed(2);
 
   requestAnimationFrame(ts => {
     startPhase('inhale', ts);
@@ -1075,6 +1094,7 @@ async function onCycleComplete() {
 
     if (data.test_complete) {
       stopBreathing();
+      clearStageTimers();
       showResults();
       return;
     }
@@ -1084,18 +1104,9 @@ async function onCycleComplete() {
       return;  // Keep breathing at fixed frequency, no stage indicators
     }
 
-    if (data.stage_complete) {
-      // New stage - reset coherence tracker for new frequency
-      if (coherenceTracker) coherenceTracker.reset();
-      testState.currentStage = data.new_stage - 1;
-      testState.currentCycle = 0;
-      updateStageIndicators();
-      updateCycleIndicators();
-      startBreathing();
-    } else {
-      testState.currentCycle = data.current_cycle - 1;
-      updateCycleIndicators();
-    }
+    // find_prbf: update cycle counter display only (stage advance is timer-driven)
+    testState.currentCycle = data.current_cycle - 1;
+    updateCycleIndicators();
 
   } catch (e) {
     console.error('Cycle complete error:', e);
@@ -1114,23 +1125,26 @@ async function startTest() {
   }
 }
 
-// ── Find PRBF: multi-frequency sweep, simple inhale/exhale colors ──────────
+// ── Find PRBF: multi-frequency sweep with timed stages + washout ──────────
+let findPrbfStageStartTime = null;  // performance.now() ref for current stage
+
 async function startFindPrbfTest() {
   coherenceTracker = null; // No coherence colors
+  isWashout = false;
 
   await fetch(api('/api/cdi-prbf/configure'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       mode: 'find_prbf',
-      cycles_per_frequency: CYCLES_PER_FREQ,
       inhale_ratio: inhaleRatio,
       exhale_ratio: exhaleRatio,
       username: USERNAME,
     })
   });
 
-  await fetch(api('/api/cdi-prbf/start'), { method: 'POST' });
+  const resp = await fetch(api('/api/cdi-prbf/start'), { method: 'POST' });
+  const startData = await resp.json();
 
   testState.currentStage = 0;
   testState.currentCycle = 0;
@@ -1140,8 +1154,8 @@ async function startFindPrbfTest() {
   updateCycleIndicators();
   showScreen('test');
 
-  // Show find_prbf elements
-  document.getElementById('baseline-timer-bar').style.display = 'none';
+  // Show find_prbf elements + stage timer bar
+  document.getElementById('baseline-timer-bar').style.display = 'flex';
   document.getElementById('coherence-info').style.display = 'none';
   document.getElementById('blossom-info').style.display = 'none';
   document.getElementById('debug-panel').style.display = 'none';
@@ -1152,10 +1166,121 @@ async function startFindPrbfTest() {
   document.getElementById('metrics-bar').style.display = '';
   document.getElementById('freq-value').parentElement.style.display = '';
   document.getElementById('cycle-value').parentElement.style.display = '';
+  // Repurpose baseline timer display for stage countdown
+  const timerLabel = document.querySelector('#baseline-timer-bar .info-item:first-child .label');
+  if (timerLabel) timerLabel.textContent = '本档剩余';
+  document.getElementById('baseline-timer-value').style.color = 'var(--yellow)';
   const cycleIndicatorParent = document.querySelector('.cycle-indicator').parentElement.parentElement;
   if (cycleIndicatorParent) cycleIndicatorParent.style.display = '';
 
   startBreathing();
+  startStageTimer(STAGE_DURATION);
+}
+
+// ── Stage timer (60 s active phase) ───────────────────────────────────────
+function startStageTimer(durationSec) {
+  clearStageTimers();
+  isWashout = false;
+  stageRemaining = durationSec;
+  stageTimerStartTime = performance.now() / 1000;
+  updateStageTimerDisplay();
+  // Show breathing circle during active phase
+  document.getElementById('circle-wrap').style.display = '';
+  document.getElementById('phase-text').style.display = '';
+  if (animFrame === null) startBreathing();
+
+  stageTimerInterval = setInterval(() => {
+    const elapsed = (performance.now() / 1000) - stageTimerStartTime;
+    stageRemaining = Math.max(0, durationSec - elapsed);
+    updateStageTimerDisplay();
+    if (stageRemaining <= 0) {
+      clearInterval(stageTimerInterval);
+      stageTimerInterval = null;
+      onStageTimeUp();
+    }
+  }, 250);
+}
+
+// ── Washout timer (30 s rest between stages) ──────────────────────────────
+function startWashoutTimer(durationSec) {
+  clearStageTimers();
+  isWashout = true;
+  stageRemaining = durationSec;
+  stageTimerStartTime = performance.now() / 1000;
+  updateStageTimerDisplay();
+  // Hide breathing circle during washout
+  stopBreathing();
+  document.getElementById('circle-wrap').style.display = 'none';
+  document.getElementById('phase-text').style.display = 'none';
+
+  washoutTimerInterval = setInterval(() => {
+    const elapsed = (performance.now() / 1000) - stageTimerStartTime;
+    stageRemaining = Math.max(0, durationSec - elapsed);
+    updateStageTimerDisplay();
+    if (stageRemaining <= 0) {
+      clearInterval(washoutTimerInterval);
+      washoutTimerInterval = null;
+      onWashoutComplete();
+    }
+  }, 250);
+}
+
+function updateStageTimerDisplay() {
+  const mins = Math.floor(stageRemaining / 60);
+  const secs = Math.floor(stageRemaining % 60);
+  const el = document.getElementById('baseline-timer-value');
+  el.textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  el.style.color = isWashout ? 'var(--accent)' : 'var(--yellow)';
+  const label = document.querySelector('#baseline-timer-bar .info-item:first-child .label');
+  if (label) label.textContent = isWashout ? '洗脱剩余' : '本档剩余';
+}
+
+function clearStageTimers() {
+  if (stageTimerInterval) { clearInterval(stageTimerInterval); stageTimerInterval = null; }
+  if (washoutTimerInterval) { clearInterval(washoutTimerInterval); washoutTimerInterval = null; }
+}
+
+// ── Stage time-up → advance to next stage (or finish) ─────────────────────
+async function onStageTimeUp() {
+  try {
+    const resp = await fetch(api('/api/cdi-prbf/advance-stage'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const data = await resp.json();
+
+    if (data.test_complete) {
+      testState.isRunning = false;
+      showResults();
+      return;
+    }
+
+    if (data.stage_complete) {
+      // Update to next stage (but don't start breathing yet — washout first)
+      testState.currentStage = data.new_stage - 1;
+      testState.currentCycle = 0;
+      updateStageIndicators();
+      updateCycleIndicators();
+      // Update info bar for next stage preview
+      freqValue.textContent = data.new_frequency.toFixed(2);
+      cycleValue.textContent = data.new_cycle_length.toFixed(2);
+      // Start washout
+      startWashoutTimer(data.washout_duration || WASHOUT_DURATION);
+    }
+  } catch (e) {
+    console.error('Advance stage error:', e);
+  }
+}
+
+// ── Washout complete → start next stage ───────────────────────────────────
+function onWashoutComplete() {
+  isWashout = false;
+  // Show circle again
+  document.getElementById('circle-wrap').style.display = '';
+  document.getElementById('phase-text').style.display = '';
+  // Start breathing at current stage's cycle length
+  startBreathing(CDI_CYCLE_LENGTHS[testState.currentStage]);
+  startStageTimer(STAGE_DURATION);
 }
 
 // ── Control Group: fixed 0.1 Hz, coherence colors ─────────────────────────
@@ -1275,7 +1400,7 @@ async function startControlGroupTest() {
   // Re-size blossom canvas now that the screen is visible
   if (blossomEffect) blossomEffect.resize();
 
-  startBreathing(6.0);  // 0.1 Hz fixed frequency for control group
+  startBreathing(10.0);  // 0.1 Hz = 6 bpm = 10 s cycle for control group
   startBaselineTimer(durationSec);
 }
 
@@ -1494,6 +1619,7 @@ async function stopTest() {
   if (!confirm('确定要停止测试吗？当前进度将丢失。')) return;
 
   stopBreathing();
+  clearStageTimers();
   if (baselineTimerInterval) {
     clearInterval(baselineTimerInterval);
     baselineTimerInterval = null;
@@ -1551,10 +1677,12 @@ async function showResults() {
     // Update best result
     document.getElementById('results-title').textContent = '🎯 您的个性化共振频率';
     document.getElementById('best-freq-label').textContent = 'breaths/min (bpm)';
-    document.getElementById('best-cycle-label').textContent = '推荐呼吸周期';
+    document.getElementById('best-cycle-label').textContent = '推荐呼吸周期 (秒/次)';
     if (best) {
-      document.getElementById('best-freq').textContent = best.frequency.toFixed(2);
-      document.getElementById('best-cycle').textContent = best.cycle.toFixed(2) + ' s';
+      const bestCl = best.cycle_length != null ? best.cycle_length.toFixed(1) : '--';
+      const bestFreq = best.frequency != null ? best.frequency.toFixed(2) : '--';
+      document.getElementById('best-freq').textContent = bestFreq;
+      document.getElementById('best-cycle').textContent = bestCl + ' s';
     }
 
     // Build table
@@ -1562,13 +1690,13 @@ async function showResults() {
     tbody.innerHTML = '';
 
     results.forEach((r, i) => {
-      const isBest = best && r.frequency === best.frequency;
+      const isBest = best && r.cycle_length === best.cycle_length;
       const tr = document.createElement('tr');
       if (isBest) tr.classList.add('best');
       tr.innerHTML = `
         <td>${r.stage}</td>
-        <td>${r.frequency.toFixed(2)}</td>
-        <td>${r.cycle.toFixed(2)}</td>
+        <td>${r.cycle_length != null ? r.cycle_length.toFixed(1) + ' s' : '--'}</td>
+        <td>${r.frequency != null ? r.frequency.toFixed(2) : '--'}</td>
         <td>${r.lf_avg != null ? r.lf_avg.toFixed(3) : '--'}</td>
         <td>${r.rmssd_avg != null ? r.rmssd_avg.toFixed(1) : '--'}</td>
         <td>${r.bpm_avg != null ? r.bpm_avg.toFixed(1) : '--'}</td>
@@ -2106,7 +2234,7 @@ document.querySelectorAll('#mode-select .ratio-btn').forEach(btn => {
     } else if (testMode === 'deep_breathing') {
       descEl.textContent = '无视觉辅助的自由深呼吸测试，请根据自身节奏进行深呼吸，采集心率变异性数据。默认时长90秒，可在上方修改。';
     } else {
-      descEl.textContent = '本测试将帮助您找到最佳的共振呼吸频率。系统会引导您在不同频率下呼吸，并通过心率变异性（HRV）分析确定产生最高LF功率的频率。';
+      descEl.textContent = '本测试将帮助您找到个性化的共振呼吸频率。系统会引导您在5.5–10.0秒的不同呼吸周期下呼吸（每档60秒，间隔30秒洗脱期），并通过心率变异性（HRV）分析确定产生最高LF功率的呼吸周期。总计约15分钟。';
     }
 
     // Ratio selector: only for find_prbf

@@ -1,11 +1,12 @@
 """
-CDI Personalized Resonance Frequency Breathing (PRBF) Module.
+CDI Personalized Resonance Breathing Frequency (PRBF) Module.
 
 This module implements the CDI-specific PRBF protocol:
-- 10 frequency stages from 8.0 to 10.25 bpm (0.25 increment)
-- 3 breathing cycles per frequency
-- Records LF Power and RMSSD for each frequency
-- Selects the frequency with highest LF Power as PRBF
+- 10 cycle-length stages from 5.5s to 10.0s (0.5s increment per breath)
+- Each stage: 60s of paced breathing, followed by 30s washout
+- Records LF Power and RMSSD for each cycle length
+- Selects the cycle length with highest LF Power as the personalized
+  resonance breathing frequency
 
 Route: /cdi-prbf (page), /api/cdi-prbf/* (API)
 """
@@ -23,7 +24,17 @@ cdi_prbf_bp = Blueprint("cdi_prbf", __name__)
 
 
 # CDI PRBF Protocol Constants
-CDI_FREQUENCIES = [8.0, 8.25, 8.5, 8.75, 9.0, 9.25, 9.5, 9.75, 10.0, 10.25]
+# Cycle lengths in seconds per full breath (inhale + exhale).
+# Range: 5.5 s to 10.0 s in 0.5 s increments (10 stages).
+CDI_CYCLE_LENGTHS = [5.5, 6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 9.0, 9.5, 10.0]
+# Derived: corresponding breathing frequencies in breaths per minute.
+CDI_FREQUENCIES = [round(60.0 / cl, 2) for cl in CDI_CYCLE_LENGTHS]
+
+# Each paced-breathing stage lasts 60 s; 30 s washout between stages.
+STAGE_DURATION = 60      # seconds of paced breathing per stage
+WASHOUT_DURATION = 30    # seconds of rest between stages
+
+# Kept for backward compatibility (no longer used for stage advancement).
 CYCLES_PER_FREQUENCY = 3
 
 
@@ -73,7 +84,10 @@ def configure():
     cdi_config = {
         "mode": data.get("mode", "find_prbf"),  # "find_prbf", "control_group", or "baseline"
         "frequencies": CDI_FREQUENCIES,
+        "cycle_lengths": CDI_CYCLE_LENGTHS,
         "cycles_per_frequency": data.get("cycles_per_frequency", CYCLES_PER_FREQUENCY),
+        "stage_duration": STAGE_DURATION,
+        "washout_duration": WASHOUT_DURATION,
         "inhale_ratio": data.get("inhale_ratio", 5),
         "exhale_ratio": data.get("exhale_ratio", 5),
         "current_stage": 0,
@@ -97,6 +111,9 @@ def configure():
         "ok": True,
         "config": cdi_config,
         "frequencies": CDI_FREQUENCIES,
+        "cycle_lengths": CDI_CYCLE_LENGTHS,
+        "stage_duration": STAGE_DURATION,
+        "washout_duration": WASHOUT_DURATION,
     })
 
 
@@ -158,19 +175,20 @@ def start_test():
                 "duration": duration,
             })
         else:
-            # find_prbf: multi-frequency sweep
+            # find_prbf: multi-frequency sweep with timed stages + washout
+            first_cl = CDI_CYCLE_LENGTHS[0]
             first_freq = CDI_FREQUENCIES[0]
-            cycle = 60.0 / first_freq
-            sess.session_config["breath_cycle"] = cycle
-            sess.breath_cycle = cycle
+            sess.session_config["breath_cycle"] = first_cl
+            sess.breath_cycle = first_cl
             return jsonify({
                 "ok": True,
                 "mode": "find_prbf",
                 "current_stage": 0,
-                "frequency": CDI_FREQUENCIES[0],
-                "cycle": cycle,
-                "total_stages": len(CDI_FREQUENCIES),
-                "cycles_per_frequency": cdi_config.get("cycles_per_frequency", CYCLES_PER_FREQUENCY),
+                "cycle_length": first_cl,
+                "frequency": first_freq,
+                "total_stages": len(CDI_CYCLE_LENGTHS),
+                "stage_duration": STAGE_DURATION,
+                "washout_duration": WASHOUT_DURATION,
             })
 
 
@@ -218,80 +236,100 @@ def on_cycle_complete():
                 "cycle": current_cycle + 2,
             })
 
-        cycles_per_freq = cdi_config.get("cycles_per_frequency", CYCLES_PER_FREQUENCY)
-        total_stages = len(CDI_FREQUENCIES)
-        
-        # Check if we've completed all cycles for this frequency
-        if current_cycle + 1 >= cycles_per_freq:
-            # Compute stage metrics
-            metrics = _compute_stage_metrics(sess)
-            stage_result = {
-                "stage": current_stage + 1,
-                "frequency": CDI_FREQUENCIES[current_stage],
-                "cycle": 60.0 / CDI_FREQUENCIES[current_stage],
-                "lf_avg": metrics["lf_avg"],
-                "rmssd_avg": metrics["rmssd_avg"],
-                "bpm_avg": metrics["bpm_avg"],
-                "cycles_completed": metrics["count"],
-            }
-            cdi_config["stage_results"].append(stage_result)
-            
-            # Move to next stage
-            if current_stage + 1 >= total_stages:
-                # Test complete
-                cdi_config["test_active"] = False
-                cdi_config["test_complete"] = True
-                
-                # Find best frequency (highest LF Power)
-                best = None
-                for sr in cdi_config["stage_results"]:
-                    if sr.get("lf_avg") is not None:
-                        if best is None or sr["lf_avg"] > best["lf_avg"]:
-                            best = sr
-                cdi_config["best_result"] = best
-                
-                sess.session_active = False
-                
-                return jsonify({
-                    "ok": True,
-                    "stage_complete": True,
-                    "test_complete": True,
-                    "stage": current_stage + 1,
-                    "total_stages": total_stages,
-                    "stage_result": stage_result,
-                    "best_result": best,
-                })
-            else:
-                # Advance to next stage
-                cdi_config["current_stage"] = current_stage + 1
-                cdi_config["current_cycle"] = 0
-                cdi_config["stage_data"] = []
-                
-                next_freq = CDI_FREQUENCIES[current_stage + 1]
-                next_cycle = 60.0 / next_freq
-                sess.session_config["breath_cycle"] = next_cycle
-                sess.breath_cycle = next_cycle
-                
-                return jsonify({
-                    "ok": True,
-                    "stage_complete": True,
-                    "test_complete": False,
-                    "new_stage": current_stage + 2,  # 1-indexed
-                    "new_frequency": next_freq,
-                    "new_cycle": next_cycle,
-                    "stage_result": stage_result,
-                })
-        else:
-            # Continue to next cycle in same stage
-            cdi_config["current_cycle"] = current_cycle + 1
-            
+        # find_prbf: time-based stage advancement.
+        # on-cycle-complete only records per-cycle data; stage advancement is
+        # triggered separately by on-stage-time-up when the 60 s timer expires.
+        cdi_config["current_cycle"] = current_cycle + 1
+
+        return jsonify({
+            "ok": True,
+            "stage_complete": False,
+            "test_complete": False,
+            "current_stage": current_stage + 1,  # 1-indexed
+            "current_cycle": current_cycle + 2,  # 1-indexed
+            "cycle_data": cycle_data,
+        })
+
+
+@cdi_prbf_bp.route("/api/cdi-prbf/advance-stage", methods=["POST"])
+def advance_stage():
+    """
+    Called by frontend when the 60 s stage timer expires.
+    Computes stage metrics, advances to the next stage, and returns
+    the next cycle length (or signals test completion).
+    """
+    sess = get_current_session()
+
+    with sess.lock:
+        cdi_config = sess.session_config.get("cdi_prbf", {})
+        if not cdi_config.get("test_active"):
+            return jsonify({"error": "Test not active"}), 400
+
+        mode = cdi_config.get("mode", "find_prbf")
+        if mode != "find_prbf":
+            return jsonify({"error": "Not in find_prbf mode"}), 400
+
+        current_stage = cdi_config["current_stage"]
+        total_stages = len(CDI_CYCLE_LENGTHS)
+
+        # Compute metrics for the stage that just finished
+        metrics = _compute_stage_metrics(sess)
+        stage_result = {
+            "stage": current_stage + 1,
+            "cycle_length": CDI_CYCLE_LENGTHS[current_stage],
+            "frequency": CDI_FREQUENCIES[current_stage],
+            "lf_avg": metrics["lf_avg"],
+            "rmssd_avg": metrics["rmssd_avg"],
+            "bpm_avg": metrics["bpm_avg"],
+            "cycles_completed": metrics["count"],
+        }
+        cdi_config["stage_results"].append(stage_result)
+
+        # Advance to next stage (or finish)
+        if current_stage + 1 >= total_stages:
+            # Test complete — all stages done
+            cdi_config["test_active"] = False
+            cdi_config["test_complete"] = True
+
+            # Find best stage (highest LF Power)
+            best = None
+            for sr in cdi_config["stage_results"]:
+                if sr.get("lf_avg") is not None:
+                    if best is None or sr["lf_avg"] > best["lf_avg"]:
+                        best = sr
+            cdi_config["best_result"] = best
+
+            sess.session_active = False
+
             return jsonify({
                 "ok": True,
-                "stage_complete": False,
+                "stage_complete": True,
+                "test_complete": True,
+                "stage": current_stage + 1,
+                "total_stages": total_stages,
+                "stage_result": stage_result,
+                "best_result": best,
+            })
+        else:
+            # Advance to next stage
+            cdi_config["current_stage"] = current_stage + 1
+            cdi_config["current_cycle"] = 0
+            cdi_config["stage_data"] = []
+
+            next_cl = CDI_CYCLE_LENGTHS[current_stage + 1]
+            next_freq = CDI_FREQUENCIES[current_stage + 1]
+            sess.session_config["breath_cycle"] = next_cl
+            sess.breath_cycle = next_cl
+
+            return jsonify({
+                "ok": True,
+                "stage_complete": True,
                 "test_complete": False,
-                "current_stage": current_stage + 1,  # 1-indexed
-                "current_cycle": current_cycle + 2,  # 1-indexed
-                "cycle_data": cycle_data,
+                "new_stage": current_stage + 2,  # 1-indexed
+                "new_cycle_length": next_cl,
+                "new_frequency": next_freq,
+                "stage_result": stage_result,
+                "washout_duration": WASHOUT_DURATION,
             })
 
 
@@ -316,15 +354,17 @@ def get_status():
             "test_complete": cdi_config.get("test_complete", False),
             "current_stage": current_stage + 1,  # 1-indexed
             "current_cycle": current_cycle + 1,  # 1-indexed
-            "total_stages": len(CDI_FREQUENCIES),
+            "total_stages": len(CDI_CYCLE_LENGTHS),
             "cycles_per_frequency": cdi_config.get("cycles_per_frequency", CYCLES_PER_FREQUENCY),
+            "current_cycle_length": CDI_CYCLE_LENGTHS[current_stage] if current_stage < len(CDI_CYCLE_LENGTHS) else None,
             "current_frequency": CDI_FREQUENCIES[current_stage] if current_stage < len(CDI_FREQUENCIES) else None,
-            "current_cycle_duration": 60.0 / CDI_FREQUENCIES[current_stage] if current_stage < len(CDI_FREQUENCIES) else None,
             "current_metrics": metrics,
             "stage_results": cdi_config.get("stage_results", []),
             "best_result": cdi_config.get("best_result"),
             "blossom_count": sess.blossom_count,
             "blossom_threshold": sess.blossom_threshold,
+            "stage_duration": STAGE_DURATION,
+            "washout_duration": WASHOUT_DURATION,
         })
 
 
@@ -591,25 +631,36 @@ def save_results():
                 "series_timestamps": data.get("series_timestamps", []),
             }
         else:
-            # find_prbf: multi-frequency sweep with cycle/stage structure
+            # find_prbf: multi-frequency sweep with timed stages + washout
             stage_data = cdi_config.get("stage_data", [])
             stage_results = cdi_config.get("stage_results", [])
             best_result = cdi_config.get("best_result")
             cycle_rr_list = list(sess.cycle_rr_list)
-            cycles_per_freq = cdi_config.get("cycles_per_frequency", CYCLES_PER_FREQUENCY)
 
             # Build per-cycle data
             cycles = []
             for i, rr_cycle in enumerate(cycle_rr_list):
-                stage_idx = i // cycles_per_freq
+                # Cycles are recorded sequentially; map to stage via
+                # cumulative cycle counts stored alongside each stage's data.
+                # For simplicity we tag each cycle with the stage inferred
+                # from the cycle index and the per-stage cycle counts in
+                # stage_results.
                 cycles.append({
                     "cycle_number": i + 1,
-                    "stage": stage_idx + 1,
-                    "frequency": CDI_FREQUENCIES[stage_idx] if stage_idx < len(CDI_FREQUENCIES) else None,
-                    "cycle_duration": 60.0 / CDI_FREQUENCIES[stage_idx] if stage_idx < len(CDI_FREQUENCIES) else None,
                     "rr_intervals": rr_cycle,
                     "rr_count": len(rr_cycle),
                 })
+
+            # Attach stage info to cycles by walking through stage_results
+            cycle_idx = 0
+            for sr in stage_results:
+                n = sr.get("cycles_completed", 0)
+                for j in range(n):
+                    if cycle_idx + j < len(cycles):
+                        cycles[cycle_idx + j]["stage"] = sr["stage"]
+                        cycles[cycle_idx + j]["cycle_length"] = sr["cycle_length"]
+                        cycles[cycle_idx + j]["frequency"] = sr["frequency"]
+                cycle_idx += n
 
             session_record = {
                 "id": str(uuid.uuid4()),
@@ -620,8 +671,11 @@ def save_results():
                 "sub_type": "find_prbf",
                 "tag": "同济设创数据",
                 "config": {
+                    "cycle_lengths": CDI_CYCLE_LENGTHS,
                     "frequencies": CDI_FREQUENCIES,
-                    "cycles_per_frequency": cycles_per_freq,
+                    "stage_duration": STAGE_DURATION,
+                    "washout_duration": WASHOUT_DURATION,
+                    "total_stages": len(CDI_CYCLE_LENGTHS),
                     "total_cycles": len(cycle_rr_list),
                 },
                 "cycles": cycles,
@@ -667,5 +721,6 @@ def save_results():
                 "total_stages": len(stage_results),
                 "bpm_avg": session_record["bpm_avg"],
                 "best_frequency": best_result.get("frequency") if best_result else None,
+                "best_cycle_length": best_result.get("cycle_length") if best_result else None,
             },
         })
