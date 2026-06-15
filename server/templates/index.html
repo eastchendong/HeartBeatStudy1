@@ -56,13 +56,6 @@
     gap: 0.5rem;
     flex-wrap: wrap;
   }
-  #ble-btn {
-    background: var(--surface);
-    color: var(--accent);
-    border: 1px solid var(--border);
-    cursor: pointer;
-  }
-  #ble-btn:hover { background: var(--border); }
   #relay-keyword, #relay-select {
     background: var(--surface);
     color: var(--text);
@@ -598,7 +591,6 @@
   <h1>HeartBeat · 呼吸训练</h1>
   <div class="header-right">
     <span id="session-id-label" style="font-size:0.72rem;color:var(--text);padding:0.2em 0.7em;border:1px solid var(--border);border-radius:999px;background:var(--surface);font-family:monospace;"></span>
-    <button id="ble-btn" class="pill">连接传感器 (BLE)</button>
     <button id="relay-connect-btn" class="pill relay-btn">连接心电带 (浏览器)</button>
     <button id="relay-stop-btn" class="pill relay-btn" style="display:none">断开心电带</button>
     <span id="conn-pill" class="pill pill-waiting">等待中…</span>
@@ -1070,7 +1062,6 @@ const COLORS = {
 // ELEMENTS
 // ══════════════════════════════════════════════════════════════════════════
 const connPill       = document.getElementById('conn-pill');
-const bleBtn         = document.getElementById('ble-btn');
 const relayConnectBtn= document.getElementById('relay-connect-btn');
 const relayStopBtn   = document.getElementById('relay-stop-btn');
 
@@ -1397,6 +1388,15 @@ function connectSSE() {
       sessionDuration = session_duration;
     }
 
+    // Update connection status when heart rate data arrives (even in standby)
+    if (bpm > 0) {
+      connPill.className   = 'pill pill-connected';
+      connPill.textContent = 'Live ♥';
+      bpmHistory.push(bpm);
+      if (bpmHistory.length > MAX_HISTORY) bpmHistory.shift();
+      updateSparkline();
+    }
+
     // Only animate during active session
     if (!sessionActive) return;
 
@@ -1411,12 +1411,6 @@ function connectSSE() {
     }
 
     if (bpm > 0) {
-      connPill.className   = 'pill pill-connected';
-      connPill.textContent = 'Live ♥';
-      bpmHistory.push(bpm);
-      if (bpmHistory.length > MAX_HISTORY) bpmHistory.shift();
-      updateSparkline();
-
       const newCycle = { total, inhale, exhale };
       if (idleMode) { cycle = newCycle; startBreathing(); }
       else          { pendingCycle = newCycle; }
@@ -2483,102 +2477,6 @@ document.getElementById('b-restart-btn').addEventListener('click', async () => {
   setMode('buteyko');
   showScreen('start-screen');
   footerEl.textContent = 'HeartBeat 呼吸训练 · 连接设备后开始';
-});
-
-// ══════════════════════════════════════════════════════════════════════════
-// WEB BLUETOOTH
-// ══════════════════════════════════════════════════════════════════════════
-const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
-const DEVICE_NAME  = "HeartBeat-ESP32";
-const CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
-
-let lastBeatTime = 0;
-const ibiBuffer = [];
-const IBI_BUFFER_SIZE = 10;
-let lastPostTime = 0;
-const POST_INTERVAL = 1000;
-
-function computeRMSSD(ibis) {
-  if (ibis.length < 2) return null;
-  let sumSqDiff = 0;
-  for (let i = 1; i < ibis.length; i++) {
-    const diff = (ibis[i] - ibis[i-1]) * 1000;
-    sumSqDiff += diff * diff;
-  }
-  return Math.sqrt(sumSqDiff / (ibis.length - 1));
-}
-
-async function onBeat() {
-  const now = Date.now() / 1000;
-  if (lastBeatTime > 0) {
-    const ibi = now - lastBeatTime;
-    if (ibi > 0.25 && ibi < 2.0) {
-      ibiBuffer.push(ibi);
-      if (ibiBuffer.length > IBI_BUFFER_SIZE) ibiBuffer.shift();
-      const avgIbi = ibiBuffer.reduce((a, b) => a + b, 0) / ibiBuffer.length;
-      const bpm    = Math.round(60.0 / avgIbi);
-      const rmssd  = computeRMSSD(ibiBuffer);
-      console.log(`[BLE] BEAT! IBI=${ibi.toFixed(3)}s BPM=${bpm} RMSSD=${rmssd ? rmssd.toFixed(1) : '--'}`);
-      if ((Date.now() - lastPostTime) >= POST_INTERVAL) {
-        try {
-          const payload = { bpm };
-          // Send raw RR intervals (in ms) for server-side HRV computation
-          payload.rr_intervals = ibiBuffer.map(x => Math.round(x * 1000));
-          if (rmssd !== null) payload.hrv_rmssd = parseFloat(rmssd.toFixed(2));
-          fetch(api('/api/pulse'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-          }).catch(e => console.error("Post error:", e));
-          lastPostTime = Date.now();
-        } catch (e) { console.error("Error processing beat:", e); }
-      }
-    }
-  }
-  lastBeatTime = now;
-}
-
-function handleCharacteristicValueChanged(event) {
-  const value = event.target.value;
-  const decoder = new TextDecoder('utf-8');
-  const text = decoder.decode(value).trim();
-  if (text.includes("BEAT")) onBeat();
-}
-
-bleBtn.addEventListener('click', async () => {
-  console.log('[BLE-ESP32] Button clicked, checking navigator.bluetooth...');
-  try {
-    if (!navigator.bluetooth) {
-      console.warn('[BLE-ESP32] navigator.bluetooth not available');
-      setBleDiagnosticError('ESP32 BLE', 'navigator.bluetooth 不可用');
-      alert('Web Bluetooth 不支持此浏览器。请使用 Chrome（桌面或 Android），确保使用 HTTPS 或 localhost。');
-      return;
-    }
-    console.log('[BLE-ESP32] Requesting device with name:', DEVICE_NAME);
-    const device = await navigator.bluetooth.requestDevice({
-      filters: [{ name: DEVICE_NAME }],
-      optionalServices: [SERVICE_UUID]
-    });
-    console.log('[BLE-ESP32] Device selected:', device.name);
-    const server = await device.gatt.connect();
-    console.log('[BLE-ESP32] GATT connected');
-    const service = await server.getPrimaryService(SERVICE_UUID);
-    console.log('[BLE-ESP32] Service found');
-    const characteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
-    console.log('[BLE-ESP32] Characteristic found');
-    await characteristic.startNotifications();
-    characteristic.addEventListener('characteristicvaluechanged', handleCharacteristicValueChanged);
-    bleBtn.textContent = 'BLE 已连接';
-    bleBtn.style.borderColor = 'var(--green)';
-    bleBtn.style.color = 'var(--green)';
-    bleBtn.disabled = true;
-    console.log('[BLE-ESP32] Connected successfully');
-    updateBleDiagnostics();
-  } catch (error) {
-    console.error('[BLE-ESP32] Connection failed:', error);
-    setBleDiagnosticError('ESP32 BLE', error);
-    alert('BLE 连接失败: ' + error);
-  }
 });
 
 // ══════════════════════════════════════════════════════════════════════════
