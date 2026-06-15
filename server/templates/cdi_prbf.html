@@ -2045,7 +2045,7 @@ function checkDataFreshness() {
   if (lastLiveDataTime > 0 && (Date.now() - lastLiveDataTime) > 5000) {
     if (connPill.className.includes('pill-connected')) {
       connPill.className = 'pill pill-waiting';
-      connPill.textContent = '已连接 – 等待数据…';
+      connPill.textContent = '等待数据…';
     }
   }
 }
