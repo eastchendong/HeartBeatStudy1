@@ -2501,6 +2501,7 @@ function updateHeartBeltButtons(state, detail = '') {
   if (state === 'connected') {
     relayConnectBtn.disabled = true;
     relayConnectBtn.textContent = detail ? `心电带已连接 (${detail})` : '心电带已连接';
+    relayStopBtn.textContent = detail ? `${detail} 断开` : '断开心电带';
     relayStopBtn.style.display = 'inline-block';
     relayStopBtn.disabled = false;
     return;

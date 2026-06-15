@@ -2107,30 +2107,117 @@ document.getElementById('test-duration').addEventListener('change', function() {
   document.getElementById('ratio-select-group').parentElement.style.display = 'none';
 })();
 
-// BLE relay buttons
-document.getElementById('relay-connect-btn').addEventListener('click', async () => {
+// BLE relay state
+let heartBeltRelay = null;
+let heartBeltConnected = false;
+
+// Initialize relay support check
+(function initRelay() {
   if (!window.BrowserBleHeartRelay) {
-    alert('浏览器BLE功能未加载');
+    document.getElementById('relay-connect-btn').disabled = true;
+    document.getElementById('relay-connect-btn').textContent = '浏览器不支持心电带 BLE';
     return;
   }
-  try {
-    const config = {
-      deviceNamePrefix: 'Farbeat',
-      pulseUrl: api('/api/pulse'),
-    };
-    const relay = new window.BrowserBleHeartRelay(config);
-    await relay.connect();
-    document.getElementById('relay-connect-btn').style.display = 'none';
-    document.getElementById('relay-stop-btn').style.display = '';
-  } catch (e) {
-    alert('连接失败: ' + e.message);
-  }
-});
 
-document.getElementById('relay-stop-btn').addEventListener('click', () => {
-  document.getElementById('relay-connect-btn').style.display = '';
-  document.getElementById('relay-stop-btn').style.display = 'none';
-});
+  const config = {
+    deviceNamePrefix: 'Farbeat',
+    pulseUrl: api('/api/pulse'),
+  };
+  heartBeltRelay = new window.BrowserBleHeartRelay(config);
+
+  heartBeltRelay.setCallbacks({
+    onStatus: ({ state, deviceName }) => {
+      const connectBtn = document.getElementById('relay-connect-btn');
+      const stopBtn = document.getElementById('relay-stop-btn');
+      const footerEl = document.querySelector('footer');
+
+      if (state === 'connecting' || state === 'requesting-device') {
+        connectBtn.disabled = true;
+        connectBtn.textContent = '连接心电带中…';
+        stopBtn.style.display = 'inline-block';
+        stopBtn.disabled = true;
+      } else if (state === 'initializing') {
+        connectBtn.disabled = true;
+        connectBtn.textContent = '初始化心电带中…';
+        stopBtn.style.display = 'inline-block';
+        stopBtn.disabled = true;
+      } else if (state === 'connected') {
+        heartBeltConnected = true;
+        connectBtn.disabled = true;
+        connectBtn.textContent = deviceName ? `心电带已连接 (${deviceName})` : '心电带已连接';
+        stopBtn.textContent = deviceName ? `${deviceName} 断开` : '断开';
+        stopBtn.style.display = 'inline-block';
+        stopBtn.disabled = false;
+        if (footerEl) footerEl.textContent = `CDI 共振呼吸测试 · ${deviceName || '心电带'} 已连接`;
+      } else if (state === 'disconnected') {
+        heartBeltConnected = false;
+        connectBtn.disabled = false;
+        connectBtn.textContent = '连接心电带';
+        stopBtn.style.display = 'none';
+        stopBtn.disabled = true;
+        if (footerEl) footerEl.textContent = 'CDI 共振呼吸测试 · 请使用心率传感器获取准确数据';
+      }
+    },
+    onDeviceInfo: ({ power, version }) => {
+      const footerEl = document.querySelector('footer');
+      if (!footerEl) return;
+      const parts = [];
+      if (Number.isFinite(power) && power > 0) parts.push(`电量 ${power}%`);
+      if (version) parts.push(`版本 ${version}`);
+      if (parts.length > 0) {
+        footerEl.textContent = `CDI 共振呼吸测试 · ${parts.join(' · ')}`;
+      }
+    },
+    onError: (error) => {
+      console.error('Heart belt BLE error:', error);
+    },
+  });
+
+  document.getElementById('relay-connect-btn').addEventListener('click', async () => {
+    const connectBtn = document.getElementById('relay-connect-btn');
+    const stopBtn = document.getElementById('relay-stop-btn');
+    connectBtn.disabled = true;
+    connectBtn.textContent = '连接心电带中…';
+    stopBtn.style.display = 'inline-block';
+    stopBtn.disabled = true;
+    try {
+      const info = await heartBeltRelay.connect();
+      heartBeltConnected = true;
+      connectBtn.textContent = info.deviceName ? `心电带已连接 (${info.deviceName})` : '心电带已连接';
+      stopBtn.textContent = info.deviceName ? `${info.deviceName} 断开` : '断开';
+      stopBtn.disabled = false;
+    } catch (e) {
+      heartBeltConnected = false;
+      connectBtn.disabled = false;
+      connectBtn.textContent = '连接心电带';
+      stopBtn.style.display = 'none';
+      alert('连接失败: ' + (e && e.message ? e.message : e));
+    }
+  });
+
+  document.getElementById('relay-stop-btn').addEventListener('click', async () => {
+    const stopBtn = document.getElementById('relay-stop-btn');
+    stopBtn.disabled = true;
+    try {
+      await heartBeltRelay.disconnect();
+    } catch (e) {
+      console.error('Heart belt disconnect failed:', e);
+    } finally {
+      heartBeltConnected = false;
+      document.getElementById('relay-connect-btn').disabled = false;
+      document.getElementById('relay-connect-btn').textContent = '连接心电带';
+      stopBtn.style.display = 'none';
+      const footerEl = document.querySelector('footer');
+      if (footerEl) footerEl.textContent = 'CDI 共振呼吸测试 · 请使用心率传感器获取准确数据';
+    }
+  });
+
+  window.addEventListener('beforeunload', () => {
+    if (heartBeltRelay && heartBeltRelay.isConnected()) {
+      heartBeltRelay.disconnect().catch(() => {});
+    }
+  });
+})();
 
 // ══════════════════════════════════════════════════════════════════════════
 // Init

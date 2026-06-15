@@ -179,8 +179,7 @@ def receive_pulse():
         snap_cycle = sess.breath_cycle
 
     payload = _make_payload(sess, snap_bpm, snap_rmssd, snap_cycle, batch_rr_pulses)
-    if not is_paused and is_active:
-        _broadcast(sess, payload)
+    _broadcast(sess, payload)
     return jsonify(payload), 200
 
 
