@@ -593,6 +593,15 @@
       <input type="number" id="test-duration" value="7" min="1" max="30" step="1" />
     </div>
 
+    <div class="form-group" id="freq-group">
+      <label>共振频率 (bpm)</label>
+      <input type="number" id="control-freq" value="6.0" min="3" max="15" step="0.1" />
+      <div style="font-size:0.72rem;color:var(--muted);margin-top:0.25rem">
+        对应呼吸周期: <span id="freq-to-cycle-label">10.0</span> 秒/次 &nbsp;|&nbsp;
+        <span style="color:var(--accent)">Find PRBF 最佳频率可在此输入</span>
+      </div>
+    </div>
+
     <div class="form-group" id="lf-threshold-group">
       <label>LF Power 激励阈值 (ms²)</label>
       <input type="number" id="lf-threshold" value="500" min="100" max="2000" step="50" />
@@ -1283,10 +1292,12 @@ function onWashoutComplete() {
   startStageTimer(STAGE_DURATION);
 }
 
-// ── Control Group: fixed 0.1 Hz, coherence colors ─────────────────────────
+// ── Control Group: configurable resonance frequency, coherence colors ───────
 async function startControlGroupTest() {
   const durationSec = testDuration * 60;
   const lfThreshold = parseInt(document.getElementById('lf-threshold').value) || 500;
+  const ctrlFreq = parseFloat(document.getElementById('control-freq').value) || 6.0;
+  const ctrlCycle = 60.0 / ctrlFreq;
   coherenceTracker = new window.RSACoherenceTracker();
 
   // Init blossom effect with custom threshold
@@ -1356,7 +1367,7 @@ async function startControlGroupTest() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       mode: 'control_group',
-      frequency: 6.0,
+      frequency: ctrlFreq,
       duration: durationSec,
       username: USERNAME,
     })
@@ -1366,7 +1377,7 @@ async function startControlGroupTest() {
   const data = await resp.json();
   if (!data.ok) { alert('启动失败'); return; }
 
-  // Set breath cycle from server response
+  // Set breath cycle from server response (respects our chosen frequency)
   testState.breathCycle = {
     inhale: data.cycle * 0.5,
     exhale: data.cycle * 0.5,
@@ -1400,7 +1411,7 @@ async function startControlGroupTest() {
   // Re-size blossom canvas now that the screen is visible
   if (blossomEffect) blossomEffect.resize();
 
-  startBreathing(10.0);  // 0.1 Hz = 6 bpm = 10 s cycle for control group
+  startBreathing(ctrlCycle);  // use the configured resonance frequency
   startBaselineTimer(durationSec);
 }
 
@@ -2212,6 +2223,10 @@ document.querySelectorAll('#mode-select .ratio-btn').forEach(btn => {
     document.getElementById('lf-threshold-group').style.display =
       testMode === 'control_group' ? '' : 'none';
 
+    // Frequency input: only for control_group
+    document.getElementById('freq-group').style.display =
+      testMode === 'control_group' ? '' : 'none';
+
     // Set per-mode duration defaults
     const durInput = document.getElementById('test-duration');
     if (testMode === 'control_group') {
@@ -2228,7 +2243,7 @@ document.querySelectorAll('#mode-select .ratio-btn').forEach(btn => {
     // Update intro description
     const descEl = document.getElementById('intro-desc');
     if (testMode === 'control_group') {
-      descEl.textContent = '固定频率 0.1 Hz（6 bpm）共振呼吸，通过实时HRV反馈引导您进入共振状态。';
+      descEl.textContent = '自定义共振频率（默认 6 bpm / 0.1 Hz），可输入 Find PRBF 扫频测试获得的最佳频率，通过实时HRV反馈引导您进入共振状态。';
     } else if (testMode === 'baseline') {
       descEl.textContent = '无视觉引导的基线测试，用于采集静息状态下的心率变异性数据。';
     } else if (testMode === 'deep_breathing') {
@@ -2249,10 +2264,18 @@ document.getElementById('test-duration').addEventListener('change', function() {
   this.value = testDuration;
 });
 
+// Frequency input — update live cycle-length label
+document.getElementById('control-freq').addEventListener('input', function() {
+  const freq = parseFloat(this.value) || 6.0;
+  const cl = (60.0 / freq).toFixed(1);
+  document.getElementById('freq-to-cycle-label').textContent = cl;
+});
+
 // Set initial UI state for default mode (control_group)
 (function initModeUI() {
   document.getElementById('protocol-section').style.display = 'none';
   document.getElementById('duration-group').style.display = '';
+  document.getElementById('freq-group').style.display = '';
   document.getElementById('lf-threshold-group').style.display = '';
   document.getElementById('ratio-select-group').parentElement.style.display = 'none';
 })();
