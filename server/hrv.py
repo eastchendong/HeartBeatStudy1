@@ -60,7 +60,7 @@ def compute_lf_power(rr_ms: list, fs: float = 4.0) -> Optional[float]:
         return None
 
     # Interpolate to uniform sampling
-    n_samples = max(32, int(win_duration * fs))
+    n_samples = max(32, int(np.ceil(win_duration * fs)))
     t_uniform = np.linspace(t_win[0], t_win[-1], n_samples)
     rr_interp = np.interp(t_uniform, t_win, rr_win)
 
