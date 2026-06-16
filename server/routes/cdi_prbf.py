@@ -107,6 +107,8 @@ def configure():
         "username": data.get("username", ""),
         "duration": data.get("duration", 360),  # control_group/baseline, default 6 min
         "frequency": data.get("frequency", 6.0),  # control_group only, default 6 bpm (0.1 Hz)
+        "lf_threshold": data.get("lf_threshold", 500),  # blossom incentive threshold (ms²)
+        "coherence_difficulty": data.get("coherence_difficulty", 0.5),  # coherence colour threshold
     }
 
     with sess.lock:
@@ -279,6 +281,7 @@ def advance_stage():
     the next cycle length (or signals test completion).
     """
     sess = get_current_session()
+    data = request.get_json(silent=True) or {}
 
     with sess.lock:
         cdi_config = sess.session_config.get("cdi_prbf", {})
@@ -302,6 +305,7 @@ def advance_stage():
             "rmssd_avg": metrics["rmssd_avg"],
             "bpm_avg": metrics["bpm_avg"],
             "cycles_completed": metrics["count"],
+            "stage_coherence": data.get("stage_coherence"),  # max coherence in last 10s
         }
         cdi_config["stage_results"].append(stage_result)
 
@@ -593,6 +597,19 @@ def save_results():
 
         if mode == "baseline" or mode == "deep_breathing":
             # Baseline / Deep Breathing: flat format, no visual guidance
+            lf_series = data.get("lf_power_series", [])
+
+            # For deep_breathing: compute LF threshold from 95th percentile
+            lf_threshold = None
+            lf_95th = None
+            if mode == "deep_breathing" and lf_series:
+                lf_valid = [v for v in lf_series if v is not None and v > 0]
+                if lf_valid:
+                    lf_sorted = sorted(lf_valid)
+                    idx_95 = int(len(lf_sorted) * 0.95)
+                    lf_95th = lf_sorted[min(idx_95, len(lf_sorted) - 1)]
+                    lf_threshold = round(lf_95th * 0.70, 4)  # 70% difficulty coefficient
+
             session_record = {
                 "id": str(uuid.uuid4()),
                 "session_id": sess.session_id,
@@ -616,6 +633,13 @@ def save_results():
                 "lf_power": round(final_lf, 4) if final_lf is not None else None,
                 "blossom_count": sess.blossom_count,
                 "blossom_threshold": sess.blossom_threshold,
+                # Time-series data for deep_breathing threshold computation
+                "lf_power_series": lf_series,
+                "coherence_series": data.get("coherence_series", []),
+                "series_timestamps": data.get("series_timestamps", []),
+                # Computed LF incentive threshold (70% of 95th percentile)
+                "lf_threshold": lf_threshold,
+                "lf_95th_percentile": lf_95th,
             }
         elif mode == "control_group":
             # Control group: flat format, fixed 0.1 Hz resonance with visual guidance
@@ -633,6 +657,8 @@ def save_results():
                     "frequency": freq,
                     "breath_cycle": 60.0 / freq,
                     "duration": cdi_config.get("duration", 360),
+                    "lf_threshold": cdi_config.get("lf_threshold", 500),
+                    "coherence_difficulty": cdi_config.get("coherence_difficulty", 0.5),
                 },
                 "rr_intervals_ms": rr_data,
                 "rr_timestamps": rr_ts_data,
@@ -731,16 +757,29 @@ def save_results():
         # Reset test state
         cdi_config["test_active"] = False
 
+        # Build extended summary
+        summary = {
+            "mode": mode,
+            "total_cycles": len(cycle_rr_list),
+            "total_stages": len(stage_results),
+            "bpm_avg": session_record["bpm_avg"],
+            "best_frequency": best_result.get("frequency") if best_result else None,
+            "best_cycle_length": best_result.get("cycle_length") if best_result else None,
+        }
+
+        # Include LF threshold for deep_breathing
+        if mode == "deep_breathing":
+            summary["lf_threshold"] = session_record.get("lf_threshold")
+            summary["lf_95th_percentile"] = session_record.get("lf_95th_percentile")
+
+        # Include best stage coherence for find_prbf
+        if mode == "find_prbf" and best_result:
+            summary["best_coherence"] = best_result.get("stage_coherence")
+            summary["best_lf_avg"] = best_result.get("lf_avg")
+
         return jsonify({
             "ok": True,
             "file": str(filepath.name),
             "mirrored_to": mirrored_to,
-            "summary": {
-                "mode": mode,
-                "total_cycles": len(cycle_rr_list),
-                "total_stages": len(stage_results),
-                "bpm_avg": session_record["bpm_avg"],
-                "best_frequency": best_result.get("frequency") if best_result else None,
-                "best_cycle_length": best_result.get("cycle_length") if best_result else None,
-            },
+            "summary": summary,
         })

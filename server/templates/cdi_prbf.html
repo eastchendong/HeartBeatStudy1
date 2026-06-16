@@ -583,6 +583,15 @@
     <div class="form-group" id="lf-threshold-group">
       <label>LF Power 激励阈值 (ms²)</label>
       <input type="number" id="lf-threshold" value="500" min="100" max="2000" step="50" />
+      <div style="font-size:0.72rem;color:var(--muted);margin-top:0.25rem" id="lf-threshold-hint"></div>
+    </div>
+
+    <div class="form-group" id="coherence-difficulty-group">
+      <label>Coherence 难度系数 (0–1)</label>
+      <input type="number" id="coherence-difficulty" value="0.5" min="0.1" max="0.95" step="0.01" />
+      <div style="font-size:0.72rem;color:var(--muted);margin-top:0.25rem">
+        用于颜色等级判断阈值 · 越高越难进入深色共振状态
+      </div>
     </div>
 
     <button id="start-btn">开始测试</button>
@@ -730,6 +739,7 @@
             <th>LF Power</th>
             <th>RMSSD</th>
             <th>BPM</th>
+            <th>Coherence</th>
           </tr>
         </thead>
         <tbody id="results-body">
@@ -847,6 +857,11 @@ let controlGroupData = null;  // { bpm: [], lf: [], coherence: [], timestamps: [
 let lastLiveDataTime = 0;
 let liveDataStaleTimer = null;
 
+// Cross-mode stored values (auto-fill for subsequent tests)
+let storedDeepBreathingThreshold = null;  // LF incentive threshold from deep_breathing
+let storedBestPRBFCoherence = null;       // coherence at best PRBF frequency
+let storedBestPRBFFrequency = null;       // best PRBF frequency (bpm)
+
 // ══════════════════════════════════════════════════════════════════════════
 // Elements
 // ══════════════════════════════════════════════════════════════════════════
@@ -953,7 +968,7 @@ function applyCoherenceColor() {
 function applyPhaseColor(phase) {
   if (testMode === 'baseline' || testMode === 'deep_breathing') return;
 
-  if (coherenceTracker) {
+  if (coherenceTracker && testMode === 'control_group') {
     // Control group: coherence-based color
     applyCoherenceColor();
   } else {
@@ -1085,9 +1100,13 @@ async function startTest() {
 
 // ── Find PRBF: multi-frequency sweep with timed stages + washout ──────────
 let findPrbfStageStartTime = null;  // performance.now() ref for current stage
+let stageCoherenceMax = 0;          // max coherence in last 10s of current stage
 
 async function startFindPrbfTest() {
-  coherenceTracker = null; // No coherence colors
+  // Use coherence tracker for measurement only (not for colour display)
+  coherenceTracker = new window.RSACoherenceTracker();
+  stageCoherenceMax = 0;
+
   isWashout = false;
 
   await fetch(api('/api/cdi-prbf/configure'), {
@@ -1148,6 +1167,15 @@ function startStageTimer(durationSec) {
     const elapsed = (performance.now() / 1000) - stageTimerStartTime;
     stageRemaining = Math.max(0, durationSec - elapsed);
     updateStageTimerDisplay();
+
+    // Track max coherence in the last 10 seconds of the stage
+    if (stageRemaining <= 10 && coherenceTracker) {
+      const currentCoherence = coherenceTracker.smoothedCoherence;
+      if (currentCoherence > stageCoherenceMax) {
+        stageCoherenceMax = currentCoherence;
+      }
+    }
+
     if (stageRemaining <= 0) {
       clearInterval(stageTimerInterval);
       stageTimerInterval = null;
@@ -1198,9 +1226,13 @@ function clearStageTimers() {
 // ── Stage time-up → advance to next stage (or finish) ─────────────────────
 async function onStageTimeUp() {
   try {
+    const coherenceToSend = testMode === 'find_prbf' ? stageCoherenceMax : null;
     const resp = await fetch(api('/api/cdi-prbf/advance-stage'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        stage_coherence: coherenceToSend,
+      }),
     });
     const data = await resp.json();
 
@@ -1229,6 +1261,7 @@ async function onStageTimeUp() {
 // ── Washout complete → start next stage ───────────────────────────────────
 function onWashoutComplete() {
   isWashout = false;
+  stageCoherenceMax = 0;  // reset for next stage
   // Show circle again
   document.getElementById('circle-wrap').style.display = '';
   document.getElementById('phase-text').style.display = '';
@@ -1243,7 +1276,11 @@ async function startControlGroupTest() {
   const lfThreshold = parseInt(document.getElementById('lf-threshold').value) || 500;
   const ctrlFreq = parseFloat(document.getElementById('control-freq').value) || 6.0;
   const ctrlCycle = 60.0 / ctrlFreq;
-  coherenceTracker = new window.RSACoherenceTracker();
+  const coherenceDifficulty = parseFloat(document.getElementById('coherence-difficulty').value) || 0.5;
+
+  coherenceTracker = new window.RSACoherenceTracker({
+    threshold: coherenceDifficulty,  // use custom coherence difficulty
+  });
 
   // Init blossom effect with custom threshold
   const particleCanvas = document.getElementById('particle-canvas');
@@ -1315,6 +1352,8 @@ async function startControlGroupTest() {
       frequency: ctrlFreq,
       duration: durationSec,
       username: USERNAME,
+      lf_threshold: lfThreshold,
+      coherence_difficulty: coherenceDifficulty,
     })
   });
 
@@ -1622,6 +1661,12 @@ async function showResults() {
     const results = data.stage_results || [];
     const best = data.best_result;
 
+    // Store best PRBF frequency and coherence for control_group auto-fill
+    if (best) {
+      storedBestPRBFFrequency = best.frequency;
+      storedBestPRBFCoherence = best.stage_coherence;
+    }
+
     // Show cards, reset containers
     document.querySelector('.result-card.best-result').style.display = '';
     document.querySelectorAll('.result-card')[1].style.display = '';
@@ -1637,11 +1682,28 @@ async function showResults() {
     if (best) {
       const bestCl = best.cycle_length != null ? best.cycle_length.toFixed(1) : '--';
       const bestFreq = best.frequency != null ? best.frequency.toFixed(2) : '--';
+      const bestCoherence = best.stage_coherence != null ? best.stage_coherence.toFixed(3) : '--';
       document.getElementById('best-freq').textContent = bestFreq;
       document.getElementById('best-cycle').textContent = bestCl + ' s';
+
+      // Show LF Power and coherence for best frequency
+      document.getElementById('results-stats').innerHTML = `
+        <div class="chart-summary">
+          <div class="chart-stat">
+            <div class="label">最佳 LF Power</div>
+            <div class="value" style="color:var(--green)">${best.lf_avg != null ? best.lf_avg.toFixed(3) : '--'}</div>
+            <div style="font-size:0.7rem;color:var(--muted)">ms²</div>
+          </div>
+          <div class="chart-stat" style="border-color:var(--accent);background:rgba(88,166,255,0.08)">
+            <div class="label">🎯 该频率 Coherence</div>
+            <div class="value" style="color:var(--accent)">${bestCoherence}</div>
+            <div style="font-size:0.7rem;color:var(--muted)">0–1 — 将用于Control Group</div>
+          </div>
+        </div>
+      `;
     }
 
-    // Build table
+    // Build table (with Coherence column)
     const tbody = document.getElementById('results-body');
     tbody.innerHTML = '';
 
@@ -1656,6 +1718,7 @@ async function showResults() {
         <td>${r.lf_avg != null ? r.lf_avg.toFixed(3) : '--'}</td>
         <td>${r.rmssd_avg != null ? r.rmssd_avg.toFixed(1) : '--'}</td>
         <td>${r.bpm_avg != null ? r.bpm_avg.toFixed(1) : '--'}</td>
+        <td>${r.stage_coherence != null ? r.stage_coherence.toFixed(3) : '--'}</td>
       `;
       tbody.appendChild(tr);
     });
@@ -1753,6 +1816,20 @@ function showDeepBreathingResults() {
   const d = controlGroupData || { bpm: [], rr: [], lf: [], coherence: [], timestamps: [] };
   const avgFn = arr => arr.length ? (arr.reduce((a, b) => a + b, 0) / arr.length) : 0;
 
+  // Compute LF threshold: 70% of 95th percentile of natural deep breathing LF power
+  const lfValid = d.lf.filter(v => v !== null && v !== undefined && v > 0);
+  let lf95th = null;
+  let lfThreshold = null;
+  if (lfValid.length > 0) {
+    const lfSorted = [...lfValid].sort((a, b) => a - b);
+    const idx95 = Math.min(Math.floor(lfSorted.length * 0.95), lfSorted.length - 1);
+    lf95th = lfSorted[idx95];
+    lfThreshold = +(lf95th * 0.70).toFixed(2);  // 70% difficulty coefficient
+  }
+
+  // Store for auto-fill in control_group mode
+  storedDeepBreathingThreshold = lfThreshold;
+
   document.querySelector('.result-card.best-result').style.display = '';
   document.querySelectorAll('.result-card')[1].style.display = '';
   document.getElementById('results-stats').innerHTML = '';
@@ -1793,6 +1870,24 @@ function showDeepBreathingResults() {
         <div class="value" style="color:#58a6ff">${avgCoherence.toFixed(3)}</div>
         <div style="font-size:0.7rem;color:var(--muted)">0–1</div>
       </div>
+      ${lf95th !== null ? `
+      <div class="chart-stat" style="border-color:var(--accent)">
+        <div class="label">LF 第95百分位</div>
+        <div class="value" style="color:var(--yellow)">${lf95th.toFixed(2)}</div>
+        <div style="font-size:0.7rem;color:var(--muted)">ms²</div>
+      </div>
+      <div class="chart-stat" style="border-color:var(--accent);background:rgba(88,166,255,0.08)">
+        <div class="label">🎯 LF 激励阈值 (70%)</div>
+        <div class="value" style="color:var(--accent)">${lfThreshold.toFixed(2)}</div>
+        <div style="font-size:0.7rem;color:var(--muted)">ms² — 将用于Control Group</div>
+      </div>
+      ` : `
+      <div class="chart-stat">
+        <div class="label">LF 激励阈值</div>
+        <div class="value" style="color:var(--muted)">--</div>
+        <div style="font-size:0.7rem;color:var(--muted)">数据不足</div>
+      </div>
+      `}
     </div>
   `;
 
@@ -1993,8 +2088,8 @@ async function saveResults() {
     const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout
 
     const saveBody = { username: USERNAME };
-    // Include time-series data for control_group mode
-    if (testMode === 'control_group' && controlGroupData) {
+    // Include time-series data for control_group and deep_breathing modes
+    if ((testMode === 'control_group' || testMode === 'deep_breathing' || testMode === 'baseline') && controlGroupData) {
       saveBody.lf_power_series = controlGroupData.lf;
       saveBody.coherence_series = controlGroupData.coherence;
       saveBody.series_timestamps = controlGroupData.timestamps;
@@ -2172,18 +2267,52 @@ document.querySelectorAll('#mode-select .ratio-btn').forEach(btn => {
     document.getElementById('lf-threshold-group').style.display =
       testMode === 'control_group' ? '' : 'none';
 
+    // Coherence difficulty: only for control_group
+    document.getElementById('coherence-difficulty-group').style.display =
+      testMode === 'control_group' ? '' : 'none';
+
     // Frequency input: only for control_group
     document.getElementById('freq-group').style.display =
       testMode === 'control_group' ? '' : 'none';
+
+    // Auto-fill stored values when switching to control_group
+    if (testMode === 'control_group') {
+      const lfInput = document.getElementById('lf-threshold');
+      const cohInput = document.getElementById('coherence-difficulty');
+      const freqInput = document.getElementById('control-freq');
+      const hintEl = document.getElementById('lf-threshold-hint');
+
+      // Auto-fill LF threshold from deep_breathing results
+      if (storedDeepBreathingThreshold !== null) {
+        lfInput.value = storedDeepBreathingThreshold;
+        if (hintEl) hintEl.textContent = '已从深呼吸测试自动填入 (70% × 第95百分位)';
+      } else {
+        if (hintEl) hintEl.textContent = '';
+      }
+
+      // Auto-fill frequency from find_prbf results
+      if (storedBestPRBFFrequency !== null) {
+        freqInput.value = storedBestPRBFFrequency;
+        const cl = (60.0 / storedBestPRBFFrequency).toFixed(1);
+        document.getElementById('freq-to-cycle-label').textContent = cl;
+      }
+
+      // Auto-fill coherence difficulty from find_prbf best coherence
+      if (storedBestPRBFCoherence !== null) {
+        cohInput.value = storedBestPRBFCoherence.toFixed(2);
+      } else {
+        cohInput.value = 0.5;  // default
+      }
+    }
 
     // Set per-mode duration defaults
     const durInput = document.getElementById('test-duration');
     if (testMode === 'control_group') {
       testDuration = 7;
     } else if (testMode === 'baseline') {
-      testDuration = 5;
+      testDuration = 3;
     } else if (testMode === 'deep_breathing') {
-      testDuration = 1.5; // 90 seconds
+      testDuration = 3;
     } else {
       testDuration = 10; // find_prbf has fixed 10-min sweep
     }
@@ -2196,7 +2325,7 @@ document.querySelectorAll('#mode-select .ratio-btn').forEach(btn => {
     } else if (testMode === 'baseline') {
       descEl.textContent = '无视觉引导的基线测试，用于采集静息状态下的心率变异性数据。';
     } else if (testMode === 'deep_breathing') {
-      descEl.textContent = '无视觉辅助的自由深呼吸测试，请根据自身节奏进行深呼吸，采集心率变异性数据。默认时长90秒，可在上方修改。';
+      descEl.textContent = '无视觉辅助的自由深呼吸测试，请根据自身节奏进行深呼吸，采集心率变异性数据。默认时长3分钟，可在上方修改。';
     } else {
       descEl.textContent = '本测试将帮助您找到个性化的共振呼吸频率。系统会引导您在5.5–10.0秒的不同呼吸周期下呼吸（每档60秒，间隔30秒洗脱期），并通过心率变异性（HRV）分析确定产生最高LF功率的呼吸周期。总计约15分钟。';
     }
@@ -2226,6 +2355,7 @@ document.getElementById('control-freq').addEventListener('input', function() {
   document.getElementById('duration-group').style.display = '';
   document.getElementById('freq-group').style.display = '';
   document.getElementById('lf-threshold-group').style.display = '';
+  document.getElementById('coherence-difficulty-group').style.display = '';
   document.getElementById('ratio-select-group').parentElement.style.display = 'none';
 })();
 
